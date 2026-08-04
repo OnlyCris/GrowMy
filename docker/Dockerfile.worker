@@ -38,18 +38,21 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # -----------------------------------------------------------------------------
 FROM base AS builder
 
-COPY --from=deps /app/node_modules ./node_modules
+# Copia l'INTERO albero installato, non il solo node_modules della root.
+#
+# pnpm crea un node_modules per OGNI workspace, con i symlink ai binari
+# (.bin/tsup, .bin/turbo) e ai pacchetti `@growmy/*`. Copiando solo quello della
+# root, `tsup` non risulta installato per apps/worker e il build muore con
+# "tsup: not found" — che è esattamente ciò che è successo.
+COPY --from=deps /app ./
+
+# I sorgenti si sovrappongono ai manifest già presenti: i node_modules restano.
 COPY . .
 
 ENV SKIP_ENV_VALIDATION=true
 ENV NODE_ENV=production
 
 RUN pnpm turbo run build --filter=@growmy/worker
-
-# Rimuove le devDependencies: il worker in esecuzione non ha bisogno di
-# TypeScript, dei tipi né dei tool di test.
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm prune --prod
 
 # -----------------------------------------------------------------------------
 # runner
@@ -63,9 +66,13 @@ RUN addgroup --system --gid 1001 nodejs \
 
 WORKDIR /app
 
-COPY --from=builder --chown=worker:nodejs /app/node_modules        ./node_modules
-COPY --from=builder --chown=worker:nodejs /app/apps/worker/dist    ./apps/worker/dist
-COPY --from=builder --chown=worker:nodejs /app/packages            ./packages
+# tsup impacchetta i sorgenti TypeScript e i pacchetti workspace in un solo
+# file: al runner servono solo il bundle e le dipendenze native lasciate
+# esterne (pg, ioredis, bullmq, pino). I sorgenti di `packages/` non servono.
+COPY --from=builder --chown=worker:nodejs /app/node_modules              ./node_modules
+COPY --from=builder --chown=worker:nodejs /app/apps/worker/node_modules  ./apps/worker/node_modules
+COPY --from=builder --chown=worker:nodejs /app/apps/worker/dist          ./apps/worker/dist
+COPY --from=builder --chown=worker:nodejs /app/apps/worker/package.json  ./apps/worker/package.json
 
 # Directory di lavoro per gli asset temporanei (immagini generate prima
 # dell'upload su storage).

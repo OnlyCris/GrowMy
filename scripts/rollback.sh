@@ -46,7 +46,10 @@ warn() { printf '%s[ !! ]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()  { printf '%s[fail]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; exit 1; }
 step() { printf '\n%s==> %s%s\n' "$C_BOLD" "$*" "$C_RESET"; }
 
-compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# `--env-file` esplicito: Docker Compose cerca `.env` accanto al FILE COMPOSE
+# (cioè in docker/), non nella root del progetto dove sta davvero. Senza questo
+# flag tutte le variabili risultano vuote e i container partono senza segreti.
+compose() { docker compose --env-file "${APP_DIR}/.env" -f "$COMPOSE_FILE" "$@"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

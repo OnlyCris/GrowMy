@@ -38,7 +38,10 @@ DAY_OF_MONTH="$(date +%d)"
 log()  { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
 die()  { printf '[%s] ERRORE: %s\n' "$(date -Iseconds)" "$*" >&2; exit 1; }
 
-compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# `--env-file` esplicito: Docker Compose cerca `.env` accanto al FILE COMPOSE
+# (cioè in docker/), non nella root del progetto dove sta davvero. Senza questo
+# flag tutte le variabili risultano vuote e i container partono senza segreti.
+compose() { docker compose --env-file "${APP_DIR}/.env" -f "$COMPOSE_FILE" "$@"; }
 
 # ---------------------------------------------------------------------------
 # Preparazione

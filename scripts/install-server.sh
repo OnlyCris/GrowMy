@@ -396,17 +396,17 @@ else
 
   cd "$APP_DIR"
   # Le migrazioni girano nel container web: il build deve precedere.
-  sudo -u "$DEPLOY_USER" docker compose -f "$COMPOSE_FILE" build web worker
+  sudo -u "$DEPLOY_USER" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build web worker
   ok "Immagini costruite"
 
-  sudo -u "$DEPLOY_USER" docker compose -f "$COMPOSE_FILE" up -d --remove-orphans \
+  sudo -u "$DEPLOY_USER" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans \
     postgres redis
   log "Attendo che il database sia pronto"
   sleep 6
 
   # Migrazioni Drizzle + funzioni SQL scritte a mano (app_enqueue_job, ecc.).
   log "Applicazione dello schema e delle funzioni"
-  sudo -u "$DEPLOY_USER" docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
+  sudo -u "$DEPLOY_USER" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps \
     -e DATABASE_MIGRATION_URL="postgres://app_migrator:$(grep '^POSTGRES_MIGRATOR_PASSWORD=' "$ENV_FILE" | cut -d= -f2)@postgres:5432/growmy" \
     web sh -c "npx drizzle-kit migrate --config=packages/db/drizzle.config.ts" \
     || warn "Migrazioni: verifica manuale consigliata."
@@ -414,7 +414,7 @@ else
   # Le policy RLS e le funzioni richiedono i ruoli app_*: applicate col superuser.
   for sqlfile in 0001_rls_policies.sql 0002_deferred_constraints.sql 0003_enqueue_job.sql; do
     if [[ -f "${APP_DIR}/packages/db/migrations/sql/${sqlfile}" ]]; then
-      sudo -u "$DEPLOY_USER" docker compose -f "$COMPOSE_FILE" exec -T postgres \
+      sudo -u "$DEPLOY_USER" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
         psql -U postgres -d growmy -v ON_ERROR_STOP=1 \
         < "${APP_DIR}/packages/db/migrations/sql/${sqlfile}" >/dev/null 2>&1 \
         && ok "Applicato ${sqlfile}" \
@@ -424,12 +424,12 @@ else
 
   if [[ "$DO_SEED" == "true" ]]; then
     log "Popolamento dati demo"
-    sudo -u "$DEPLOY_USER" docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
+    sudo -u "$DEPLOY_USER" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps \
       web sh -c "pnpm --filter @growmy/db seed" || warn "Seed non riuscito."
   fi
 
   log "Avvio di web e worker"
-  sudo -u "$DEPLOY_USER" docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+  sudo -u "$DEPLOY_USER" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
   ok "Container avviati"
 fi
 

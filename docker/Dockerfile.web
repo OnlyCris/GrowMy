@@ -51,8 +51,12 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # -----------------------------------------------------------------------------
 FROM base AS builder
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+# Copia l'INTERO albero installato: pnpm crea un node_modules per ogni
+# workspace, con i symlink ai binari e ai pacchetti `@growmy/*`. Copiare solo
+# quello della root lascerebbe i pacchetti workspace irrisolvibili.
+COPY --from=deps /app ./
+
+# I sorgenti si sovrappongono ai manifest: i node_modules restano al loro posto.
 COPY . .
 
 # Le NEXT_PUBLIC_* devono essere note ORA: il bundler le inlinea nel codice
