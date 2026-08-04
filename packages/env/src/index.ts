@@ -103,8 +103,18 @@ export const env = createEnv({
       ),
 
     // --- Stripe ---
-    STRIPE_SECRET_KEY: z.string().startsWith('sk_'),
-    STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
+    /**
+     * OPZIONALI di proposito. La fatturazione non è ancora attiva: nessun
+     * modulo importa queste variabili. Renderle obbligatorie impediva l'avvio
+     * di un'istanza perfettamente funzionante che semplicemente non vende
+     * ancora nulla — un fallimento senza alcun beneficio di sicurezza.
+     *
+     * Il formato resta validato: se le imposti, devono essere chiavi vere.
+     * Quando la fatturazione entrerà in funzione, il punto in cui pretendere
+     * la loro presenza è il modulo che le usa, non il boot dell'intera app.
+     */
+    STRIPE_SECRET_KEY: z.string().startsWith('sk_').optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
 
     // --- Google (OAuth + Search Console) ---
     GOOGLE_CLIENT_ID: z.string().min(1),
