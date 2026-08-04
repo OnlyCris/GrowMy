@@ -21,12 +21,14 @@
     "bullmq": "^5.28.1",
     "drizzle-orm": "^0.36.4",
     "ioredis": "^5.4.1",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "pino": "^9.5.0"
   },
   "devDependencies": {
     "@growmy/config": "workspace:*",
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
+    "pino-pretty": "^13.0.0",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
