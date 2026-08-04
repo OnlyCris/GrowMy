@@ -5,7 +5,6 @@ import { CheckCheck, Clock, Inbox, Keyboard } from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/shared/status-badge';
-import { Button } from '@/components/ui/button';
 import { cn, formatRelativeTime, truncateWords } from '@/lib/utils';
 import type { ActionResult, ArticleBrief, ReviewQueueItem } from '@/types/review';
 

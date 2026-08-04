@@ -1,7 +1,21 @@
 import { env } from '@growmy/env';
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { cache } from 'react';
+
+/**
+ * Forma dei cookie che Supabase chiede di scrivere.
+ *
+ * Il tipo è dichiarato qui invece di essere inferito perché `@supabase/ssr` non
+ * lo esporta: senza annotazione, `strict` lo tratta come `any` implicito e il
+ * build fallisce. Tipizzarlo a mano è anche più onesto — rende visibile cosa
+ * stiamo effettivamente scrivendo nei cookie di sessione.
+ */
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: CookieOptions;
+};
 
 /**
  * CLIENT SUPABASE LATO SERVER
@@ -22,7 +36,7 @@ export async function createSupabaseServerClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieToSet[]) {
           try {
             for (const { name, value, options } of cookiesToSet) {
               cookieStore.set(name, value, {
