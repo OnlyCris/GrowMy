@@ -1,0 +1,9 @@
+# L'area applicativa è dietro autenticazione: nessun motore deve indicizzarla.
+# Le pagine pubbliche (landing, blog) dichiarano i propri metadati per pagina.
+
+User-agent: *
+Disallow: /api/
+Disallow: /signin
+Disallow: /onboarding
+
+Sitemap: https://blog.menuisland.it/sitemap.xml
