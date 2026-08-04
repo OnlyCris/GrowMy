@@ -246,11 +246,16 @@ services:
       # invece di buttare silenziosamente job in coda.
       - --maxmemory-policy
       - noeviction
-      # Comandi distruttivi disabilitati.
+      # Comandi distruttivi disabilitati: rinominati in stringa vuota.
+      # `--rename-command` vuole DUE argomenti (nome originale, nuovo nome).
+      # Passarne uno solo — "FLUSHALL " — fa fallire l'avvio di Redis con
+      # "wrong number of arguments", e il container entra in crash loop.
       - --rename-command
-      - "FLUSHALL "
+      - FLUSHALL
+      - ""
       - --rename-command
-      - "FLUSHDB "
+      - FLUSHDB
+      - ""
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
