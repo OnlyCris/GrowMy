@@ -29,12 +29,19 @@ export default defineConfig({
   minify: false,
 
   /**
-   * I pacchetti workspace vengono impacchettati (comportamento di default di
-   * tsup per le dipendenze non elencate in `external`).
+   * `noExternal` FORZA l'inclusione dei pacchetti workspace nel bundle.
    *
-   * Le dipendenze con binari nativi restano ESTERNE: esbuild non può
-   * impacchettare un .node compilato, e provarci produce un bundle che esplode
-   * al primo `require`.
+   * Serve perché tsup, di default, tratta come ESTERNO tutto ciò che compare
+   * in `dependencies`. I `@growmy/*` sono lì dentro, quindi verrebbero lasciati
+   * come `import '@growmy/ai'` — che a runtime non esiste, essendo TypeScript
+   * sorgente mai compilato: `ERR_MODULE_NOT_FOUND` all'avvio del container.
+   */
+  noExternal: [/^@growmy\//],
+
+  /**
+   * Le dipendenze con binari nativi restano invece ESTERNE: esbuild non può
+   * impacchettare un `.node` compilato, e provarci produce un bundle che
+   * esplode al primo `require`.
    */
   external: ['pg', 'pg-native', 'ioredis', 'bullmq', 'pino', 'pino-pretty'],
 

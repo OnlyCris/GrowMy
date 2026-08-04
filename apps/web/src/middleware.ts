@@ -1,6 +1,23 @@
-import { env } from '@growmy/env';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+
+/**
+ * NIENTE IMPORT DI `@growmy/env` QUI.
+ *
+ * Il middleware di Next gira in EDGE RUNTIME, che non ha accesso ai moduli
+ * Node. `@growmy/env` usa `dotenv`, che importa `node:fs` e `node:path`:
+ * l'import fa esplodere il middleware con `node-module-in-edge-runtime`, e
+ * poiché il middleware intercetta OGNI richiesta, l'intera applicazione
+ * risponde 500 — anche gli endpoint di health.
+ *
+ * Leggiamo quindi `process.env` direttamente. Le `NEXT_PUBLIC_*` sono inlinee
+ * dal bundler in fase di build, quindi qui sono valori letterali e non lookup
+ * a runtime. La validazione con Zod avviene comunque nel resto dell'app, che
+ * gira in runtime Node.
+ */
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 /** Forma dei cookie che Supabase chiede di scrivere. Vedi lib/supabase/server.ts. */
 type CookieToSet = {
@@ -38,8 +55,8 @@ export async function middleware(request: NextRequest) {
 
   // --- 1. Refresh della sessione -------------------------------------------
   const supabase = createServerClient(
-    env.NEXT_PUBLIC_SUPABASE_URL,
-    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
@@ -54,7 +71,7 @@ export async function middleware(request: NextRequest) {
             response.cookies.set(name, value, {
               ...options,
               httpOnly: true,
-              secure: env.NODE_ENV === 'production',
+              secure: IS_PRODUCTION,
               sameSite: 'lax',
               path: '/',
             });
@@ -72,7 +89,7 @@ export async function middleware(request: NextRequest) {
   await supabase.auth.getUser();
 
   // --- 2. Security headers --------------------------------------------------
-  const isDev = env.NODE_ENV === 'development';
+  const isDev = !IS_PRODUCTION;
 
   /**
    * `'strict-dynamic'` consente agli script già fidati (quelli con il nonce) di
@@ -90,7 +107,7 @@ export async function middleware(request: NextRequest) {
     `img-src 'self' blob: data: https:`,
     `font-src 'self' data:`,
     // Connessioni in uscita limitate a Supabase e all'origine stessa.
-    `connect-src 'self' ${env.NEXT_PUBLIC_SUPABASE_URL} ${isDev ? 'ws: wss:' : ''}`,
+    `connect-src 'self' ${SUPABASE_URL} ${isDev ? 'ws: wss:' : ''}`,
     // Nessun plugin, nessun iframe, nessun applet.
     `object-src 'none'`,
     // Impedisce l'iniezione di un <base> che dirotterebbe gli URL relativi.
@@ -119,7 +136,7 @@ export async function middleware(request: NextRequest) {
     'camera=(), microphone=(), geolocation=(), interest-cohort=()',
   );
 
-  if (env.NODE_ENV === 'production') {
+  if (IS_PRODUCTION) {
     // HSTS con preload: dopo la prima visita il browser rifiuta HTTP.
     response.headers.set(
       'Strict-Transport-Security',
