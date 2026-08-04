@@ -1,0 +1,83 @@
+# =============================================================================
+# GrowMy — immagine del worker BullMQ
+#
+# Processo separato dall'app web, con un ambiente deliberatamente diverso:
+# è l'unico che possiede CREDENTIALS_ENCRYPTION_KEY e l'unico che si connette
+# al database con il ruolo BYPASSRLS.
+# =============================================================================
+
+ARG NODE_VERSION=22-alpine
+
+FROM node:${NODE_VERSION} AS base
+RUN apk add --no-cache libc6-compat
+RUN corepack enable
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# deps
+# -----------------------------------------------------------------------------
+FROM base AS deps
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json                 apps/web/
+COPY apps/worker/package.json              apps/worker/
+COPY packages/db/package.json              packages/db/
+COPY packages/core/package.json            packages/core/
+COPY packages/ai/package.json              packages/ai/
+COPY packages/integrations/package.json    packages/integrations/
+COPY packages/validation/package.json      packages/validation/
+COPY packages/env/package.json             packages/env/
+COPY packages/logger/package.json          packages/logger/
+COPY packages/config/package.json          packages/config/
+
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# -----------------------------------------------------------------------------
+# builder
+# -----------------------------------------------------------------------------
+FROM base AS builder
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+ENV SKIP_ENV_VALIDATION=true
+ENV NODE_ENV=production
+
+RUN pnpm turbo run build --filter=@growmy/worker
+
+# Rimuove le devDependencies: il worker in esecuzione non ha bisogno di
+# TypeScript, dei tipi né dei tool di test.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm prune --prod
+
+# -----------------------------------------------------------------------------
+# runner
+# -----------------------------------------------------------------------------
+FROM base AS runner
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser  --system --uid 1001 --ingroup nodejs worker
+
+WORKDIR /app
+
+COPY --from=builder --chown=worker:nodejs /app/node_modules        ./node_modules
+COPY --from=builder --chown=worker:nodejs /app/apps/worker/dist    ./apps/worker/dist
+COPY --from=builder --chown=worker:nodejs /app/packages            ./packages
+
+# Directory di lavoro per gli asset temporanei (immagini generate prima
+# dell'upload su storage).
+RUN install -d -o worker -g nodejs /app/uploads
+
+USER worker
+
+# Il worker non espone porte: non è raggiungibile da nessuno, per costruzione.
+# L'healthcheck usa un file che il processo tocca a ogni ciclo dell'event loop.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "const s=require('fs').statSync('/tmp/worker-healthy'); process.exit(Date.now()-s.mtimeMs < 60000 ? 0 : 1)"
+
+# `--enable-source-maps`: gli stack trace del worker devono puntare al
+# TypeScript originale, altrimenti il debug di un job fallito è illeggibile.
+CMD ["node", "--enable-source-maps", "apps/worker/dist/index.js"]

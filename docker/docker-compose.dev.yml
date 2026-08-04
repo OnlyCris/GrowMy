@@ -1,0 +1,75 @@
+name: growmy-dev
+
+# ============================================================================
+# GrowMy — infrastruttura di SVILUPPO
+#
+# Solo le dipendenze: Postgres e Redis. L'app Next.js gira sull'host con
+# `pnpm dev`, così hot reload, breakpoint e stack trace funzionano davvero.
+#
+# Differenze volute rispetto alla produzione:
+#  - Le porte SONO esposte su localhost, per poter usare psql, TablePlus e
+#    redis-cli dalla macchina.
+#  - Password banali: questo stack non deve mai essere raggiungibile da fuori.
+#  - Nessun limite di memoria: in sviluppo dà solo fastidio.
+#  - Aggiunto Mailpit per vedere le email senza inviarle davvero.
+# ============================================================================
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: growmy-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: growmy
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      # Binding esplicito su 127.0.0.1: senza, Docker aprirebbe la porta su
+      # tutte le interfacce, esponendo un database con password "postgres"
+      # a chiunque sia sulla stessa rete wifi.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Crea pgcrypto, vector e pg_trgm al primo avvio. Senza, `db:push`
+      # fallisce sulle colonne `vector` con un errore poco chiaro.
+      - ./postgres/init-dev:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d growmy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    command:
+      - postgres
+      # In sviluppo logga TUTTE le query: è il modo più rapido per accorgersi
+      # di un N+1 mentre lo stai scrivendo, invece che in produzione.
+      - -c
+      - log_statement=all
+      - -c
+      - log_min_duration_statement=0
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: growmy-dev-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Cattura le email invece di inviarle. Interfaccia su http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: growmy-dev-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # interfaccia web
+
+volumes:
+  postgres_data:
+  redis_data:

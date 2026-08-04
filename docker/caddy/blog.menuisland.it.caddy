@@ -1,0 +1,84 @@
+# ============================================================================
+# GrowMy — blocco Caddy per blog.menuisland.it
+#
+# Questo file va importato dalla Caddy che gira SULL'HOST, quella che serve
+# anche mproc.menuisland.it. Non è un container: è la stessa istanza.
+#
+# `scripts/install-server.sh` lo copia in /etc/caddy/sites/ e assicura che il
+# Caddyfile principale contenga `import sites/*.caddy`.
+#
+# STESSA IMPOSTAZIONE DEL BLOCCO mproc CHE HAI GIÀ:
+#   - il TLS usa i certificati emessi da certbot (non l'ACME automatico di Caddy);
+#   - il rinnovo è di certbot, e un hook ricarica Caddy dopo ogni rinnovo.
+#
+# La differenza è il blocco http:// qui sotto, che serve la sfista di
+# validazione: è ciò che permette a certbot di RINNOVARE il certificato mentre
+# Caddy tiene occupata la porta 80. Senza, il rinnovo automatico fallirebbe.
+# ============================================================================
+
+# --- Sfida ACME (rinnovo certbot via webroot) -------------------------------
+# certbot scrive il token in /var/www/certbot/.well-known/acme-challenge/<token>
+# e Caddy lo serve in chiaro sulla porta 80. Tutto il resto del traffico HTTP
+# viene rediretto a HTTPS.
+http://blog.menuisland.it {
+	handle /.well-known/acme-challenge/* {
+		root * /var/www/certbot
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+# --- Sito HTTPS -------------------------------------------------------------
+blog.menuisland.it {
+	# Certificati gestiti da certbot, esattamente come per mproc.
+	tls /etc/letsencrypt/live/blog.menuisland.it/fullchain.pem /etc/letsencrypt/live/blog.menuisland.it/privkey.pem
+
+	encode zstd gzip
+
+	# Non riveliamo che dietro c'è Caddy: informazione gratuita per chi cerca
+	# exploit. Gli header di sicurezza veri (CSP con nonce, HSTS, ecc.) sono
+	# impostati dal middleware di Next.js e NON vengono duplicati qui: header
+	# doppi confondono i browser e rendono impossibile capire chi imposta cosa.
+	header -Server
+
+	# Il webhook di Stripe verifica una firma HMAC sul corpo RAW. Caddy con
+	# reverse_proxy passa il corpo inalterato di default, quindi non serve
+	# configurazione speciale — ma lo esplicitiamo per evitare che un domani
+	# qualcuno aggiunga un middleware che lo tocca.
+	handle /api/webhooks/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Gli endpoint di health non devono essere raggiungibili da internet: la
+	# Caddy li tiene per sé (li usa lo script di deploy via localhost), qui li
+	# blocchiamo dall'esterno.
+	handle /api/health {
+		respond 404
+	}
+	handle /api/ready {
+		respond 404
+	}
+
+	# Tutto il resto va all'app.
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			# Se l'app non risponde entro 30s, meglio un errore pulito che una
+			# connessione appesa.
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	# Log per questo host, con rotazione gestita da Caddy.
+	log {
+		output file /var/log/caddy/blog.menuisland.it.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}

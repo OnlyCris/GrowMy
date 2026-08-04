@@ -1,0 +1,47 @@
+{
+  "name": "growmy",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@growmy/web",
+    "dev:webpack": "turbo run dev:webpack --filter=@growmy/web",
+    "dev:all": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start --filter=@growmy/web",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json,css}\"",
+
+    "infra:up": "docker compose -f docker/docker-compose.dev.yml up -d --wait",
+    "infra:down": "docker compose -f docker/docker-compose.dev.yml down",
+    "infra:reset": "docker compose -f docker/docker-compose.dev.yml down -v && pnpm infra:up",
+    "infra:logs": "docker compose -f docker/docker-compose.dev.yml logs -f",
+
+    "db:generate": "pnpm --filter @growmy/db generate",
+    "db:migrate": "pnpm --filter @growmy/db migrate",
+    "db:push": "pnpm --filter @growmy/db push",
+    "db:studio": "pnpm --filter @growmy/db studio",
+    "db:sql": "pnpm --filter @growmy/db sql",
+    "db:seed": "pnpm --filter @growmy/db seed",
+
+    "bootstrap": "pnpm infra:up && pnpm db:push && pnpm db:sql && pnpm db:seed",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3"
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "printWidth": 88
+  }
+}

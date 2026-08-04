@@ -1,0 +1,279 @@
+name: growmy
+
+# ============================================================================
+# GrowMy — stack di produzione
+#
+# Quattro servizi: web (Next.js), worker (BullMQ), postgres (con pgvector), redis.
+#
+# IL REVERSE PROXY NON È QUI. Il TLS e l'instradamento sono gestiti da una Caddy
+# che gira SULL'HOST, non in un container: lo stesso Caddy serve anche altre app
+# sul server (mproc.menuisland.it) e legge i certificati emessi da certbot.
+# GrowMy espone quindi la sola porta dell'app su 127.0.0.1:3000, e la Caddy
+# dell'host ci proxa sopra il dominio blog.menuisland.it.
+#
+# Vedi scripts/install-server.sh e docker/caddy/blog.menuisland.it.caddy.
+#
+# Principi applicati:
+#  - Postgres e Redis non escono dalla rete interna: nessuna porta verso l'host.
+#  - `web` è pubblicato SOLO su 127.0.0.1: irraggiungibile da internet se non
+#    passando dalla Caddy dell'host, che termina il TLS.
+#  - Ogni servizio ha un healthcheck reale; le dipendenze usano
+#    `condition: service_healthy`.
+#  - I segreti arrivano SOLO da .env, mai scritti qui.
+#  - `no-new-privileges` su tutti i container.
+# ============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-security: &default-security
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  # --------------------------------------------------------------------------
+  # Applicazione Next.js — dietro la Caddy dell'host
+  # --------------------------------------------------------------------------
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        # Le variabili NEXT_PUBLIC_* devono essere note in fase di build:
+        # il bundler le inlinea nel codice client.
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    image: growmy-web:${IMAGE_TAG:-latest}
+    container_name: growmy-web
+    restart: unless-stopped
+    <<: *default-security
+    logging: *default-logging
+    ports:
+      # Pubblicato SOLO su loopback: la Caddy dell'host raggiunge l'app qui,
+      # ma da internet la porta 3000 non è visibile. Il binding esplicito a
+      # 127.0.0.1 è ciò che lo garantisce — senza, Docker aprirebbe su 0.0.0.0.
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Ruolo app_user: RLS ATTIVO. È la connessione che serve le richieste HTTP.
+      DATABASE_URL: postgres://app_user:${POSTGRES_PASSWORD}@postgres:5432/growmy
+      REDIS_URL: redis://redis:6379/0
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      CSRF_SECRET: ${CSRF_SECRET}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # NOTA: CREDENTIALS_ENCRYPTION_KEY è deliberatamente ASSENTE qui.
+      # L'app web non deve poter decifrare le credenziali CMS dei clienti:
+      # quella chiave esiste solo nell'ambiente del worker.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      # `app` per la porta pubblicata e l'uscita (Supabase, Stripe);
+      # `internal` per raggiungere postgres e redis.
+      - app
+      - internal
+    healthcheck:
+      # Usa /api/ready, non /api/health: la Caddy non deve ricevere traffico
+      # prima che l'app sappia parlare con database e Redis.
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  # --------------------------------------------------------------------------
+  # Worker BullMQ
+  # --------------------------------------------------------------------------
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    image: growmy-worker:${IMAGE_TAG:-latest}
+    container_name: growmy-worker
+    restart: unless-stopped
+    <<: *default-security
+    logging: *default-logging
+    environment:
+      NODE_ENV: production
+      # Ruolo app_worker: BYPASSRLS. Opera fuori dal contesto di una sessione
+      # utente e riceve lo scope dal payload del job.
+      DATABASE_URL: postgres://app_user:${POSTGRES_PASSWORD}@postgres:5432/growmy
+      DATABASE_WORKER_URL: postgres://app_worker:${POSTGRES_WORKER_PASSWORD}@postgres:5432/growmy
+      REDIS_URL: redis://redis:6379/0
+      # Solo il worker possiede la chiave di cifratura.
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY}
+      CREDENTIALS_KEY_VERSION: ${CREDENTIALS_KEY_VERSION:-1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY}
+      LLM_PROVIDER_ORDER: ${LLM_PROVIDER_ORDER:-google,deepseek,anthropic}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      # `app` per l'uscita verso i provider LLM (Gemini/Anthropic/OpenAI) e i
+      # CMS dei clienti; `internal` per postgres e redis. Il worker non pubblica
+      # alcuna porta: non è raggiungibile dall'esterno in alcun modo.
+      - app
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const s=require('fs').statSync('/tmp/worker-healthy'); process.exit(Date.now()-s.mtimeMs < 60000 ? 0 : 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # Il worker può essere in mezzo a una generazione da 6 minuti: dargli tempo
+    # di finire evita articoli a metà e crediti riservati mai rilasciati.
+    stop_grace_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+
+  # --------------------------------------------------------------------------
+  # Postgres + pgvector
+  # --------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: growmy-postgres
+    restart: unless-stopped
+    <<: *default-security
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: growmy
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # `scram-sha-256`: md5 è deprecato e vulnerabile.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    volumes:
+      - /var/lib/growmy/postgres:/var/lib/postgresql/data
+      # Crea i ruoli app_user / app_worker / app_migrator al primo avvio.
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - internal
+    # NESSUN `ports:`. Il database non è raggiungibile dall'host né da internet.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d growmy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      # Logga le query oltre il secondo: è così che si scoprono gli indici
+      # mancanti prima che diventino un incidente.
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+  # --------------------------------------------------------------------------
+  # Redis
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    container_name: growmy-redis
+    restart: unless-stopped
+    <<: *default-security
+    logging: *default-logging
+    volumes:
+      - /var/lib/growmy/redis:/data
+    networks:
+      - internal
+    command:
+      - redis-server
+      # AOF con fsync ogni secondo: la coda BullMQ sopravvive a un riavvio.
+      # Postgres resta comunque la fonte di verità (tabella `jobs`), quindi
+      # anche perdere un secondo di AOF non perde lavoro.
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 512mb
+      # `noeviction`: se la memoria si esaurisce, Redis rifiuta le scritture
+      # invece di buttare silenziosamente job in coda.
+      - --maxmemory-policy
+      - noeviction
+      # Comandi distruttivi disabilitati.
+      - --rename-command
+      - "FLUSHALL "
+      - --rename-command
+      - "FLUSHDB "
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+
+networks:
+  # `app`: bridge normale con uscita verso internet. Ci stanno web e worker,
+  # che DEVONO poter uscire — web verso Supabase e Stripe, worker verso i
+  # provider LLM (Gemini, Anthropic, OpenAI). È anche la rete su cui web
+  # pubblica la sua porta verso 127.0.0.1 dell'host.
+  app:
+    driver: bridge
+  # `internal`: `internal: true` = nessuna route verso internet. Ci stanno solo
+  # postgres e redis, che non hanno alcun bisogno di uscire. Un data store
+  # compromesso non può esfiltrare dati né scaricare payload.
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  uploads:

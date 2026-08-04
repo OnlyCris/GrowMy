@@ -1,0 +1,115 @@
+# =============================================================================
+# GrowMy — immagine dell'applicazione Next.js
+#
+# Build multi-stage in quattro fasi. Lo scopo è che l'immagine finale contenga
+# SOLO ciò che serve a eseguire: niente sorgenti TypeScript, niente toolchain
+# di build, niente dipendenze di sviluppo. Meno cose dentro significa meno
+# CVE da patchare e meno materiale utile a chi ottenesse una shell.
+# =============================================================================
+
+ARG NODE_VERSION=22-alpine
+
+# -----------------------------------------------------------------------------
+# 1. base — dipendenze di sistema comuni
+# -----------------------------------------------------------------------------
+FROM node:${NODE_VERSION} AS base
+
+# libc6-compat: alcune dipendenze native assumono glibc, Alpine usa musl.
+RUN apk add --no-cache libc6-compat
+RUN corepack enable
+
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# 2. deps — installazione delle dipendenze
+#
+# Copiamo SOLO i manifest prima del codice: finché package.json e il lockfile
+# non cambiano, Docker riusa questo layer dalla cache. È la differenza fra un
+# build da 40 secondi e uno da 6 minuti a ogni commit.
+# -----------------------------------------------------------------------------
+FROM base AS deps
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json                 apps/web/
+COPY apps/worker/package.json              apps/worker/
+COPY packages/db/package.json              packages/db/
+COPY packages/core/package.json            packages/core/
+COPY packages/ai/package.json              packages/ai/
+COPY packages/integrations/package.json    packages/integrations/
+COPY packages/validation/package.json      packages/validation/
+COPY packages/env/package.json             packages/env/
+COPY packages/logger/package.json          packages/logger/
+COPY packages/config/package.json          packages/config/
+
+# `--frozen-lockfile`: se il lockfile non corrisponde ai manifest il build
+# fallisce, invece di risolvere versioni diverse da quelle testate.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# -----------------------------------------------------------------------------
+# 3. builder — compilazione
+# -----------------------------------------------------------------------------
+FROM base AS builder
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY . .
+
+# Le NEXT_PUBLIC_* devono essere note ORA: il bundler le inlinea nel codice
+# che gira nel browser. Passarle solo a runtime le renderebbe undefined.
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL \
+    NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+# I segreti runtime non esistono in fase di build: t3-env fallirebbe.
+# La validazione avviene comunque all'avvio del container.
+ENV SKIP_ENV_VALIDATION=true
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+RUN pnpm turbo run build --filter=@growmy/web
+
+# -----------------------------------------------------------------------------
+# 4. runner — immagine finale
+# -----------------------------------------------------------------------------
+FROM base AS runner
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# Utente non privilegiato. Un processo Node che gira come root dentro un
+# container è un'escalation gratuita per chiunque trovi una RCE.
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser  --system --uid 1001 --ingroup nodejs nextjs
+
+WORKDIR /app
+
+# `output: 'standalone'` in next.config produce una cartella con il solo
+# runtime necessario: niente node_modules completo, niente sorgenti.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public                    ./apps/web/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone          ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static              ./apps/web/.next/static
+
+# Le migrazioni servono al container `web` perché update.sh le esegue da qui.
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/migrations             ./packages/db/migrations
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/drizzle.config.ts      ./packages/db/
+
+USER nextjs
+
+EXPOSE 3000
+
+# Interroga /api/ready e non /api/health: il container non deve risultare sano
+# finché non sa parlare con database e Redis.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# `node` diretto, senza npm: npm non inoltra SIGTERM al processo figlio, quindi
+# i container impiegherebbero 10 secondi a morire a ogni deploy invece di
+# chiudersi in modo ordinato.
+CMD ["node", "apps/web/server.js"]
