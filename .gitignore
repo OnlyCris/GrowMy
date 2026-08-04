@@ -1,0 +1,49 @@
+# Dipendenze
+node_modules/
+.pnpm-store/
+
+# Build
+.next/
+out/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# Ambiente — nessun file con segreti entra mai nel repository.
+# Gli unici versionati sono gli esempi, che contengono solo segnaposto.
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# Stato di deploy generato da update.sh
+.deploy-state
+
+# Log
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# Test
+coverage/
+.nyc_output/
+
+# Certificati e chiavi — nessuna eccezione
+*.pem
+*.key
+*.crt
+*.p12
+
+# Backup del database
+*.sql.gz

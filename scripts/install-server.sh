@@ -101,10 +101,45 @@ step "Verifiche preliminari"
 [[ -f /etc/debian_version ]] || die "Script specifico per Debian/Ubuntu."
 [[ -n "$DOMAIN" ]] || die "--domain è obbligatorio."
 
-command -v docker >/dev/null 2>&1 || die "Docker non è installato. Installalo prima (vedi scripts/install.sh)."
-docker compose version >/dev/null 2>&1 || die "Il plugin 'docker compose' non è disponibile."
+export DEBIAN_FRONTEND=noninteractive
 
-ok "root · Debian · Docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+# Strumenti di base che diamo per scontati più avanti.
+if ! command -v curl >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+  apt-get update -qq
+  apt-get install -y -qq ca-certificates curl git jq openssl gnupg
+fi
+
+# Docker: se manca, lo installiamo dal repository ufficiale. Uno script
+# "completo" non può fermarsi qui — è la prima cosa che serve.
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  ok "Docker già presente: $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+else
+  log "Docker non trovato: installazione dal repository ufficiale"
+  install -m 0755 -d /etc/apt/keyrings
+
+  # Debian e Ubuntu hanno percorsi di repository diversi: rileviamo quale.
+  DOCKER_OS="debian"
+  grep -qi ubuntu /etc/os-release && DOCKER_OS="ubuntu"
+
+  curl -fsSL "https://download.docker.com/linux/${DOCKER_OS}/gpg" \
+    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/${DOCKER_OS} $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list
+
+  apt-get update -qq
+  apt-get install -y -qq \
+    docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin
+
+  systemctl enable --now docker >/dev/null 2>&1 || true
+
+  command -v docker >/dev/null 2>&1 \
+    || die "Installazione di Docker fallita. Controlla la connessione e riprova."
+  ok "Docker installato: $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+fi
 
 # Il DNS del dominio deve puntare a questo server, altrimenti certbot fallisce e
 # consuma uno dei tentativi orari del rate limit di Let's Encrypt.
