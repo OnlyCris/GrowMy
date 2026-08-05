@@ -35,6 +35,21 @@ export const env = createEnv({
     /** Connessione migrazioni. Ruolo `app_migrator`: solo DDL, solo in deploy. */
     DATABASE_MIGRATION_URL: z.string().url().startsWith('postgres').optional(),
     DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+    /**
+     * TLS verso il database. Deliberatamente NON derivato da `NODE_ENV`.
+     *
+     * Con Postgres in un container su rete Docker isolata il traffico non
+     * lascia mai l'host e il server non offre TLS: pretenderlo faceva fallire
+     * ogni connessione in produzione. Con un provider gestito (Supabase, RDS,
+     * Neon) va invece impostata a `true`.
+     *
+     * `z.coerce.boolean()` sarebbe una trappola: converte la stringa "false"
+     * in `true`, perché ogni stringa non vuota è truthy.
+     */
+    DATABASE_SSL: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
 
     // --- Redis (BullMQ + rate limiting) ---
     REDIS_URL: z.string().url().startsWith('redis'),
@@ -155,6 +170,7 @@ export const env = createEnv({
     DATABASE_WORKER_URL: process.env.DATABASE_WORKER_URL,
     DATABASE_MIGRATION_URL: process.env.DATABASE_MIGRATION_URL,
     DATABASE_POOL_MAX: process.env.DATABASE_POOL_MAX,
+    DATABASE_SSL: process.env.DATABASE_SSL,
     REDIS_URL: process.env.REDIS_URL,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET,

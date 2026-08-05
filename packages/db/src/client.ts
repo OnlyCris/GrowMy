@@ -39,9 +39,19 @@ function createPool(connectionString: string, max: number): Pool {
     // Fallisce in fretta se il database non risponde, invece di accumulare
     // richieste in attesa fino al timeout del load balancer.
     connectionTimeoutMillis: 5_000,
-    // In produzione la connessione è cifrata. `rejectUnauthorized: false` è
-    // necessario con i certificati auto-firmati dei provider gestiti.
-    ssl: isProduction ? { rejectUnauthorized: false } : undefined,
+    /**
+     * TLS solo se richiesto ESPLICITAMENTE da `DATABASE_SSL`.
+     *
+     * Legarlo a `NODE_ENV` era sbagliato: presupponeva che "produzione"
+     * significhi "database gestito remoto". Nel nostro deploy Postgres sta in
+     * un container su una rete Docker isolata, non pubblica alcuna porta e non
+     * offre TLS — il client lo pretendeva e ogni connessione falliva all'istante,
+     * con `/api/ready` bloccato su 503 e nessun messaggio d'errore utile.
+     *
+     * `rejectUnauthorized: false` resta necessario quando la variabile è
+     * attiva, perché i provider gestiti usano certificati auto-firmati.
+     */
+    ssl: env.DATABASE_SSL ? { rejectUnauthorized: false } : undefined,
   });
 
   /**
