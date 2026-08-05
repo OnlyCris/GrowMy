@@ -20,6 +20,34 @@ const secretKey = (name: string) =>
     .string()
     .min(32, `${name} deve avere almeno 32 caratteri (256 bit di entropia).`);
 
+/**
+ * RUOLO DEL PROCESSO.
+ *
+ * Web e worker condividono questo pacchetto ma NON hanno lo stesso ambiente,
+ * e la differenza è deliberata: il worker non riceve `CSRF_SECRET` né
+ * `SUPABASE_SERVICE_ROLE_KEY` perché non serve la sicurezza di richieste HTTP,
+ * e dargliele allargherebbe inutilmente la superficie d'attacco di un processo
+ * che esegue contenuto generato da terzi.
+ *
+ * Uno schema unico e rigido pretendeva però quelle variabili da entrambi, e il
+ * worker si rifiutava di partire per la mancanza di segreti che non usa.
+ */
+const IS_WORKER = process.env.APP_ROLE === 'worker';
+
+/**
+ * Rende una variabile facoltativa SOLO nel processo worker, conservando però
+ * il tipo statico `string`.
+ *
+ * Il cast è intenzionale e circoscritto: il codice web legge queste variabili
+ * e continua a vederle come stringhe garantite — perché nel processo web lo
+ * sono davvero, la validazione è invariata. Il worker non le legge mai: nessun
+ * modulo importato dalla pipeline vi accede. Senza il cast, il tipo diventerebbe
+ * `string | undefined` ovunque e costringerebbe l'app web a controlli inutili
+ * su valori che il boot ha già garantito.
+ */
+const webOnly = <T extends z.ZodTypeAny>(schema: T): T =>
+  (IS_WORKER ? schema.optional() : schema) as unknown as T;
+
 export const env = createEnv({
   // -------------------------------------------------------------------------
   // SERVER — mai esposto al browser
@@ -54,9 +82,9 @@ export const env = createEnv({
     // --- Redis (BullMQ + rate limiting) ---
     REDIS_URL: z.string().url().startsWith('redis'),
 
-    // --- Supabase ---
-    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-    SUPABASE_JWT_SECRET: secretKey('SUPABASE_JWT_SECRET'),
+    // --- Supabase (solo processo web: il worker non autentica utenti) ---
+    SUPABASE_SERVICE_ROLE_KEY: webOnly(z.string().min(1)),
+    SUPABASE_JWT_SECRET: webOnly(secretKey('SUPABASE_JWT_SECRET')),
 
     // --- Cifratura credenziali CMS (AES-256-GCM) ---
     /**
@@ -136,8 +164,11 @@ export const env = createEnv({
     GOOGLE_CLIENT_SECRET: z.string().min(1),
 
     // --- Sicurezza applicativa ---
-    /** Segreto per la firma dei token double-submit anti-CSRF. */
-    CSRF_SECRET: secretKey('CSRF_SECRET'),
+    /**
+     * Segreto per la firma dei token double-submit anti-CSRF.
+     * Solo web: il worker non riceve richieste HTTP da un browser.
+     */
+    CSRF_SECRET: webOnly(secretKey('CSRF_SECRET')),
     /** Segreto HMAC per la firma dei webhook in uscita. */
     WEBHOOK_SIGNING_SECRET: secretKey('WEBHOOK_SIGNING_SECRET'),
 
@@ -150,14 +181,15 @@ export const env = createEnv({
   // CLIENT — inlined nel bundle. Qui NON va mai nulla di segreto.
   // -------------------------------------------------------------------------
   client: {
-    NEXT_PUBLIC_APP_URL: z.string().url(),
-    NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
+    // Il worker non serve pagine: nessuna di queste esiste nel suo ambiente.
+    NEXT_PUBLIC_APP_URL: webOnly(z.string().url()),
+    NEXT_PUBLIC_SUPABASE_URL: webOnly(z.string().url()),
     /**
      * Chiave anonima. È pubblica per costruzione: la sicurezza non dipende dal
      * tenerla segreta ma dalle policy RLS, che è esattamente il motivo per cui
      * RLS è forzato su tutte e 30 le tabelle.
      */
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: webOnly(z.string().min(1)),
   },
 
   /**

@@ -118,6 +118,11 @@ services:
     logging: *default-logging
     environment:
       NODE_ENV: production
+      # Dichiara il ruolo del processo: il pacchetto `env` smette così di
+      # pretendere le variabili che appartengono solo all'app web (CSRF_SECRET,
+      # SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_*). Il worker non le riceve di
+      # proposito e senza questa riga si rifiutava di avviarsi.
+      APP_ROLE: worker
       # Ruolo app_worker: BYPASSRLS. Opera fuori dal contesto di una sessione
       # utente e riceve lo scope dal payload del job.
       DATABASE_URL: postgres://app_user:${POSTGRES_PASSWORD}@postgres:5432/growmy
