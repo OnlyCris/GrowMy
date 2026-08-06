@@ -5,6 +5,7 @@ import { signInSchema, signUpSchema } from '@growmy/validation';
 import { redirect } from 'next/navigation';
 
 import { isSafeRelativePath } from '@/lib/auth/guards';
+import { logger } from '@/lib/logger';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 import { ActionError } from './_action-result';
@@ -46,6 +47,29 @@ async function sendMagicLink(
   });
 
   if (error) {
+    /**
+     * La causa reale (rate limit di Supabase, SMTP non configurato, email
+     * respinta, ...) non deve mai raggiungere il client — ma senza loggarla
+     * qui non la vede NESSUNO: `handleError` a valle logga solo il codice e
+     * il messaggio generico che questa funzione decide di lanciare, mai
+     * l'errore originale di Supabase.
+     */
+    logger.error(
+      { err: { message: error.message, status: error.status, code: error.code }, shouldCreateUser },
+      'signInWithOtp fallita',
+    );
+
+    // 429: il servizio email di Supabase ha un limite di invii molto basso
+    // sul piano gratuito senza SMTP personalizzato — è la causa più comune
+    // di un fallimento qui, e l'unica per cui vale la pena essere specifici
+    // con l'utente invece di restituire un errore generico.
+    if (error.status === 429) {
+      throw new ActionError(
+        'RATE_LIMITED',
+        'Troppe richieste di accesso via email in questo momento. Riprova fra qualche minuto.',
+      );
+    }
+
     if (!shouldCreateUser) {
       // Il caso più comune per un errore qui, a `shouldCreateUser: false`, è
       // che l'email non corrisponda a nessun account.
