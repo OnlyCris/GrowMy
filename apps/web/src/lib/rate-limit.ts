@@ -75,6 +75,7 @@ export const RATE_LIMITS = {
   'auth.signin': { limit: 5, windowMs: 60_000 },
   'auth.signup': { limit: 3, windowMs: 3_600_000 },
   'onboarding.create-organization': { limit: 5, windowMs: 3_600_000 },
+  'products.manage': { limit: 20, windowMs: 3_600_000 },
   'invite.accept': { limit: 10, windowMs: 3_600_000 },
   'review.approve': { limit: 60, windowMs: 60_000 },
   'review.save': { limit: 60, windowMs: 60_000 },

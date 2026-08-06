@@ -32,13 +32,30 @@ export default async function OrgLayout({
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="border-b border-border">
-        <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between px-4 py-3 sm:px-6">
-          <Link
-            href={`/${membership.organizationSlug}/review`}
-            className="text-sm font-semibold tracking-tight text-foreground"
-          >
-            {membership.organizationName}
-          </Link>
+        <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-6">
+            <Link
+              href={`/${membership.organizationSlug}/review`}
+              className="text-sm font-semibold tracking-tight text-foreground"
+            >
+              {membership.organizationName}
+            </Link>
+
+            <nav className="flex items-center gap-4" aria-label="Sezioni">
+              <Link
+                href={`/${membership.organizationSlug}/review`}
+                className="text-sm text-foreground-muted hover:text-foreground"
+              >
+                Revisione
+              </Link>
+              <Link
+                href={`/${membership.organizationSlug}/products`}
+                className="text-sm text-foreground-muted hover:text-foreground"
+              >
+                Prodotti
+              </Link>
+            </nav>
+          </div>
 
           <form action={signOutAction}>
             <Button type="submit" variant="ghost" size="sm">

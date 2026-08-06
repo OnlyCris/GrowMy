@@ -6,9 +6,11 @@ import {
   Clock,
   FileText,
   Loader2,
+  PauseCircle,
   PenLine,
   Search,
   Send,
+  Sparkles,
   XCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -208,6 +210,57 @@ export function IntegrationHealthBadge({
     },
     disabled: {
       label: 'Disattivata',
+      icon: Archive,
+      cls: 'bg-surface-muted text-foreground-subtle border-border',
+    },
+  } as const;
+
+  const { label, icon: Icon, cls } = map[status];
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
+        cls,
+        className,
+      )}
+    >
+      <Icon className="size-3.5" aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Badge di stato del prodotto. Nessuno stato qui richiede una decisione
+ * umana immediata (a differenza di `brief_ready`/`draft_ready`), quindi
+ * nessuno usa l'ambra — coerente con `docs/DESIGN.md`.
+ */
+export function ProductStatusBadge({
+  status,
+  className,
+}: {
+  status: 'onboarding' | 'active' | 'paused' | 'archived';
+  className?: string;
+}) {
+  const map = {
+    onboarding: {
+      label: 'In configurazione',
+      icon: Sparkles,
+      cls: 'bg-info-100 text-info-700 border-transparent',
+    },
+    active: {
+      label: 'Attivo',
+      icon: CheckCircle2,
+      cls: 'bg-success-100 text-success-700 border-transparent',
+    },
+    paused: {
+      label: 'In pausa',
+      icon: PauseCircle,
+      cls: 'bg-surface-muted text-foreground-muted border-border',
+    },
+    archived: {
+      label: 'Archiviato',
       icon: Archive,
       cls: 'bg-surface-muted text-foreground-subtle border-border',
     },

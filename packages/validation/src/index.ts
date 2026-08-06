@@ -4,4 +4,5 @@
  * validazione lato server, che usa esattamente gli stessi schemi.
  */
 export * from './auth';
+export * from './products';
 export * from './review';

@@ -1,5 +1,6 @@
 import { withUserContext } from '@growmy/db/context';
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 
@@ -11,11 +12,14 @@ import {
   rewriteSectionAction,
   saveBriefAction,
 } from '@/actions/review.actions';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { requireOrgMembership } from '@/lib/auth/guards';
 import {
   getPreviousVersionsMarkdown,
   getReviewQueue,
 } from '@/lib/queries/review';
+import { getProductsForOrg } from '@/lib/queries/products';
 
 import { ReviewQueue } from './_components/review-queue';
 import ReviewLoading from './loading';
@@ -75,9 +79,13 @@ async function ReviewQueueLoader({ orgSlug }: { orgSlug: string }) {
    * `app.current_user_id` non è mai impostata — RLS le farebbe fallire chiuse
    * (coda sempre vuota), non con un errore che lo spieghi.
    */
-  const { items, previousVersions } = await withUserContext(
+  const { items, previousVersions, hasProducts } = await withUserContext(
     membership.userId,
     async () => {
+      // Una coda vuota è ambigua: significa "l'autopilota sta lavorando" solo
+      // se esiste almeno un prodotto. Senza, è solo "non hai ancora
+      // configurato nulla" — messaggio diverso, CTA diversa.
+      const products = await getProductsForOrg(membership.organizationId);
       const items = await getReviewQueue(membership.organizationId);
 
       // Il diff richiede il markdown precedente. Lo carichiamo solo per le
@@ -91,9 +99,23 @@ async function ReviewQueueLoader({ orgSlug }: { orgSlug: string }) {
           })),
       );
 
-      return { items, previousVersions };
+      return { items, previousVersions, hasProducts: products.length > 0 };
     },
   );
+
+  if (!hasProducts) {
+    return (
+      <Card className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+        <p className="text-sm text-foreground-muted">
+          Non hai ancora nessun sito collegato. La coda di revisione resterà
+          vuota finché non ne aggiungi uno.
+        </p>
+        <Button asChild>
+          <Link href={`/${orgSlug}/products/new`}>Aggiungi il primo sito</Link>
+        </Button>
+      </Card>
+    );
+  }
 
   return (
     <ReviewQueue
