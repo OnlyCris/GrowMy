@@ -12,19 +12,38 @@
 -- Sono dichiarate qui, dopo la creazione di tutte le tabelle. Sono TUTTE
 -- `ON DELETE SET NULL`: la cancellazione di una versione o di un articolo
 -- non deve mai cancellare a cascata il contenitore.
+--
+-- OGNI `ADD CONSTRAINT`/`CREATE TRIGGER` qui sotto è avvolto per essere
+-- idempotente (`EXCEPTION WHEN duplicate_object` / `DROP ... IF EXISTS`
+-- prima di ricreare). Non è difensiva astratta: questo file, nella sua
+-- primissima versione, si è fermato a metà in produzione — il trigger
+-- `ON auth.users` che veniva dopo (rimosso, vedi sotto) falliva sempre,
+-- lasciando i vincoli PRIMA di quel punto già committati (`psql` esegue in
+-- autocommit per istruzione salvo transazione esplicita). Rieseguire il file
+-- da capo, come qualunque script di deploy farebbe, deve funzionare a
+-- prescindere da quale sottoinsieme fosse già applicato.
 -- ============================================================================
 
-ALTER TABLE keyword_clusters
-  ADD CONSTRAINT keyword_clusters_pillar_article_fk
-  FOREIGN KEY (pillar_article_id) REFERENCES articles(id) ON DELETE SET NULL;
+DO $$ BEGIN
+  ALTER TABLE keyword_clusters
+    ADD CONSTRAINT keyword_clusters_pillar_article_fk
+    FOREIGN KEY (pillar_article_id) REFERENCES articles(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE articles
-  ADD CONSTRAINT articles_current_version_fk
-  FOREIGN KEY (current_version_id) REFERENCES article_versions(id) ON DELETE SET NULL;
+DO $$ BEGIN
+  ALTER TABLE articles
+    ADD CONSTRAINT articles_current_version_fk
+    FOREIGN KEY (current_version_id) REFERENCES article_versions(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE articles
-  ADD CONSTRAINT articles_refresh_of_fk
-  FOREIGN KEY (refresh_of_article_id) REFERENCES articles(id) ON DELETE SET NULL;
+DO $$ BEGIN
+  ALTER TABLE articles
+    ADD CONSTRAINT articles_refresh_of_fk
+    FOREIGN KEY (refresh_of_article_id) REFERENCES articles(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- CHECK CONSTRAINT: invarianti di dominio applicate dal database.
@@ -32,68 +51,107 @@ ALTER TABLE articles
 -- percorso di scrittura (worker, migrazione, script manuale) può violarli.
 -- ---------------------------------------------------------------------------
 
-ALTER TABLE products
-  ADD CONSTRAINT products_publish_hour_range
-  CHECK (publish_hour BETWEEN 0 AND 23);
+DO $$ BEGIN
+  ALTER TABLE products
+    ADD CONSTRAINT products_publish_hour_range
+    CHECK (publish_hour BETWEEN 0 AND 23);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE products
-  ADD CONSTRAINT products_word_count_order
-  CHECK (target_word_count_min > 0
-         AND target_word_count_max >= target_word_count_min);
+DO $$ BEGIN
+  ALTER TABLE products
+    ADD CONSTRAINT products_word_count_order
+    CHECK (target_word_count_min > 0
+           AND target_word_count_max >= target_word_count_min);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE products
-  ADD CONSTRAINT products_approval_timeout_positive
-  CHECK (approval_timeout_hours IS NULL OR approval_timeout_hours > 0);
+DO $$ BEGIN
+  ALTER TABLE products
+    ADD CONSTRAINT products_approval_timeout_positive
+    CHECK (approval_timeout_hours IS NULL OR approval_timeout_hours > 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE keywords
-  ADD CONSTRAINT keywords_priority_range
-  CHECK (priority_score >= 0 AND priority_score <= 100);
+DO $$ BEGIN
+  ALTER TABLE keywords
+    ADD CONSTRAINT keywords_priority_range
+    CHECK (priority_score >= 0 AND priority_score <= 100);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE keywords
-  ADD CONSTRAINT keywords_difficulty_range
-  CHECK (difficulty IS NULL OR (difficulty >= 0 AND difficulty <= 100));
+DO $$ BEGIN
+  ALTER TABLE keywords
+    ADD CONSTRAINT keywords_difficulty_range
+    CHECK (difficulty IS NULL OR (difficulty >= 0 AND difficulty <= 100));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE keywords
-  ADD CONSTRAINT keywords_term_not_blank
-  CHECK (length(btrim(term)) > 0);
+DO $$ BEGIN
+  ALTER TABLE keywords
+    ADD CONSTRAINT keywords_term_not_blank
+    CHECK (length(btrim(term)) > 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Un articolo pubblicato deve avere URL e timestamp: impedisce stati incoerenti
 -- se un processor dimentica di popolare i campi.
-ALTER TABLE articles
-  ADD CONSTRAINT articles_published_requires_url
-  CHECK (status <> 'published' OR (published_url IS NOT NULL AND published_at IS NOT NULL));
+DO $$ BEGIN
+  ALTER TABLE articles
+    ADD CONSTRAINT articles_published_requires_url
+    CHECK (status <> 'published' OR (published_url IS NOT NULL AND published_at IS NOT NULL));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Un articolo non può essere il refresh di sé stesso.
-ALTER TABLE articles
-  ADD CONSTRAINT articles_refresh_not_self
-  CHECK (refresh_of_article_id IS NULL OR refresh_of_article_id <> id);
+DO $$ BEGIN
+  ALTER TABLE articles
+    ADD CONSTRAINT articles_refresh_not_self
+    CHECK (refresh_of_article_id IS NULL OR refresh_of_article_id <> id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE article_versions
-  ADD CONSTRAINT article_versions_number_positive
-  CHECK (version_number > 0);
+DO $$ BEGIN
+  ALTER TABLE article_versions
+    ADD CONSTRAINT article_versions_number_positive
+    CHECK (version_number > 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE internal_links
-  ADD CONSTRAINT internal_links_no_self_reference
-  CHECK (source_article_id <> target_article_id);
+DO $$ BEGIN
+  ALTER TABLE internal_links
+    ADD CONSTRAINT internal_links_no_self_reference
+    CHECK (source_article_id <> target_article_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Coerenza del ledger: il segno dell'importo deve corrispondere al tipo di
 -- transazione. È l'invariante che protegge la fatturazione da bug applicativi.
-ALTER TABLE credit_ledger
-  ADD CONSTRAINT credit_ledger_amount_sign
-  CHECK (
-    (type IN ('grant_subscription','grant_topup','grant_promo','release') AND amount > 0)
-    OR (type IN ('reserve','expire') AND amount < 0)
-    OR (type = 'consume' AND amount = 0)
-    OR (type = 'adjustment')
-  );
+DO $$ BEGIN
+  ALTER TABLE credit_ledger
+    ADD CONSTRAINT credit_ledger_amount_sign
+    CHECK (
+      (type IN ('grant_subscription','grant_topup','grant_promo','release') AND amount > 0)
+      OR (type IN ('reserve','expire') AND amount < 0)
+      OR (type = 'consume' AND amount = 0)
+      OR (type = 'adjustment')
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE subscriptions
-  ADD CONSTRAINT subscriptions_seats_positive
-  CHECK (seats > 0 AND articles_per_cycle > 0);
+DO $$ BEGIN
+  ALTER TABLE subscriptions
+    ADD CONSTRAINT subscriptions_seats_positive
+    CHECK (seats > 0 AND articles_per_cycle > 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE jobs
-  ADD CONSTRAINT jobs_attempts_within_max
-  CHECK (attempts >= 0 AND attempts <= max_attempts);
+DO $$ BEGIN
+  ALTER TABLE jobs
+    ADD CONSTRAINT jobs_attempts_within_max
+    CHECK (attempts >= 0 AND attempts <= max_attempts);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Trigger: manutenzione automatica di updated_at.
@@ -120,6 +178,11 @@ BEGIN
     'gsc_connections','cannibalization_issues','subscriptions','usage_counters','jobs'
   ]
   LOOP
+    -- `DROP ... IF EXISTS` prima: `CREATE TRIGGER` non ha una forma
+    -- `OR REPLACE`, quindi rieseguire questo blocco su un DB dove i trigger
+    -- esistono già fallirebbe altrimenti con "trigger already exists".
+    EXECUTE format(
+      'DROP TRIGGER IF EXISTS %1$s_touch_updated_at ON %1$I;', t);
     EXECUTE format(
       'CREATE TRIGGER %1$s_touch_updated_at
          BEFORE UPDATE ON %1$I
@@ -172,6 +235,8 @@ BEGIN
   RETURN NULL;
 END;
 $$;
+
+DROP TRIGGER IF EXISTS organization_members_owner_guard ON organization_members;
 
 CREATE CONSTRAINT TRIGGER organization_members_owner_guard
   AFTER UPDATE OR DELETE ON organization_members
