@@ -104,14 +104,35 @@ AS $$
   SELECT p.organization_id FROM products p WHERE p.id = target_product;
 $$;
 
+-- Usata SOLO da `org_members_insert_bootstrap_owner` più sotto, per lo
+-- stesso motivo per cui `app_current_org_ids()` è SECURITY DEFINER: una
+-- policy su `organization_members` che facesse
+-- `SELECT ... FROM organization_members` direttamente, senza passare da una
+-- funzione SECURITY DEFINER, fa scattare "infinite recursion detected in
+-- policy for relation organization_members" — Postgres deve ri-applicare le
+-- policy della tabella per valutare la sub-query, compresa quella che sta
+-- ancora valutando. SECURITY DEFINER rompe il ciclo: la funzione gira con i
+-- privilegi del proprietario (bypassa RLS), non con quelli di chi chiama.
+CREATE OR REPLACE FUNCTION app_org_has_any_member(target_org uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (SELECT 1 FROM organization_members WHERE organization_id = target_org);
+$$;
+
 REVOKE EXECUTE ON FUNCTION app_current_user_id() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app_current_org_ids() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app_has_org_role(uuid, org_role[]) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app_org_of_product(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION app_org_has_any_member(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_current_user_id() TO app_user;
 GRANT EXECUTE ON FUNCTION app_current_org_ids() TO app_user;
 GRANT EXECUTE ON FUNCTION app_has_org_role(uuid, org_role[]) TO app_user;
 GRANT EXECUTE ON FUNCTION app_org_of_product(uuid) TO app_user;
+GRANT EXECUTE ON FUNCTION app_org_has_any_member(uuid) TO app_user;
 
 -- ---------------------------------------------------------------------------
 -- Abilitazione RLS su TUTTE le tabelle applicative
@@ -167,8 +188,20 @@ WITH CHECK (id = app_current_user_id());
 -- ---------------------------------------------------------------------------
 -- ORGANIZATIONS
 -- ---------------------------------------------------------------------------
+-- `OR owner_id = app_current_user_id()`: non è ridondante con la membership.
+-- Nella finestra fra l'INSERT di una nuova organizzazione e l'INSERT della
+-- sua riga di membership owner (stessa transazione, vedi
+-- `org_members_insert_bootstrap_owner` più sotto), l'organizzazione non è
+-- ancora visibile via `app_current_org_ids()`. Senza questa clausola,
+-- `INSERT ... RETURNING` sull'organizzazione fallirebbe con "new row
+-- violates row-level security policy": Postgres filtra l'output di
+-- RETURNING con le policy di SELECT, non solo con il WITH CHECK
+-- dell'INSERT. Riscontrato in produzione al primo onboarding reale.
 CREATE POLICY organizations_select ON organizations FOR SELECT TO app_user
-USING (id IN (SELECT app_current_org_ids()));
+USING (
+  id IN (SELECT app_current_org_ids())
+  OR owner_id = app_current_user_id()
+);
 
 CREATE POLICY organizations_update ON organizations FOR UPDATE TO app_user
 USING (app_has_org_role(id, ARRAY['owner','admin']::org_role[]))
@@ -218,12 +251,19 @@ WITH CHECK (app_has_org_role(organization_id, ARRAY['owner','admin']::org_role[]
 --     essere una che possiedi già (creata un istante prima nella stessa
 --     transazione da `organizations_insert_self_owner`) — non un'organizzazione
 --     esistente di qualcun altro.
---   - `NOT EXISTS (... existing membership ...)`: vale solo se l'organizzazione
---     non ha ancora NESSUN membro. Race-safe: creazione dell'org e inserimento
---     di questa riga avvengono nella stessa transazione applicativa
+--   - `NOT app_org_has_any_member(...)`: vale solo se l'organizzazione non ha
+--     ancora NESSUN membro. Race-safe: creazione dell'org e inserimento di
+--     questa riga avvengono nella stessa transazione applicativa
 --     (`createOrganizationAction`), quindi nessun'altra sessione può mai
 --     osservare l'organizzazione prima che la sua membership owner sia già
 --     committata insieme.
+--
+-- `app_org_has_any_member()` invece di una `NOT EXISTS` diretta su
+-- `organization_members`: una policy che interroga direttamente la propria
+-- tabella fa fallire Postgres con "infinite recursion detected in policy
+-- for relation organization_members" — deve ri-applicare le policy della
+-- tabella per valutare la sub-query, compresa quella ancora in corso di
+-- valutazione. Riscontrato in produzione al primo onboarding reale.
 CREATE POLICY org_members_insert_bootstrap_owner ON organization_members
 FOR INSERT TO app_user
 WITH CHECK (
@@ -234,10 +274,7 @@ WITH CHECK (
     WHERE o.id = organization_members.organization_id
       AND o.owner_id = app_current_user_id()
   )
-  AND NOT EXISTS (
-    SELECT 1 FROM organization_members existing
-    WHERE existing.organization_id = organization_members.organization_id
-  )
+  AND NOT app_org_has_any_member(organization_members.organization_id)
 );
 
 -- ---------------------------------------------------------------------------
