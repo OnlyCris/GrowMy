@@ -1,3 +1,4 @@
+import { env } from '@growmy/env';
 import { NextResponse } from 'next/server';
 
 import { ensureUserProvisioned } from '@/lib/auth/provision-user';
@@ -17,12 +18,24 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
  * resta il percorso che conta davvero per il login via email — vedi il
  * commento in `provision-user.ts`) così un utente Google al primo accesso ha
  * già la riga `public.users` prima ancora di atterrare su `/`.
+ *
+ * L'origine del redirect finale NON viene letta da `new URL(request.url)`.
+ * In self-hosting dietro un reverse proxy (Caddy → container su 127.0.0.1),
+ * `request.url` nei Route Handler di Next riflette spesso l'indirizzo su cui
+ * il server standalone È IN ASCOLTO (`HOSTNAME`, di default `0.0.0.0`, + la
+ * porta), non l'host pubblico visto dal client — l'header `Host` inoltrato da
+ * Caddy non basta a far ricostruire a Next l'origine corretta qui. Verificato
+ * in produzione: gli utenti finivano rediretti a `http://0.0.0.0:3000/...`.
+ * `NEXT_PUBLIC_APP_URL` è invece un valore esplicito e affidabile — lo stesso
+ * già usato per costruire `emailRedirectTo` in `auth.impl.ts` — quindi lo
+ * riusiamo qui invece di fidarci della richiesta.
  */
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const requestedRedirect = searchParams.get('redirectTo');
   const redirectTo = isSafeRelativePath(requestedRedirect) ? requestedRedirect : '/';
+  const origin = env.NEXT_PUBLIC_APP_URL;
 
   if (code) {
     const supabase = await createSupabaseServerClient();
