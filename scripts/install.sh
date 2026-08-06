@@ -275,13 +275,39 @@ ok "Directory create sotto ${APP_DIR} e ${DATA_DIR}"
 # ---------------------------------------------------------------------------
 step "Spazio di swap"
 
-if swapon --show | grep -q .; then
-  ok "Swap già attivo"
+# Il criterio è la QUANTITÀ di swap, non la sua esistenza.
+#
+# Molte VPS arrivano con una partizione di swap simbolica (256 MB è tipico).
+# Un controllo del tipo «esiste swap?» la considera sufficiente e prosegue —
+# ed è esattamente così che un deploy finisce ucciso dall'OOM killer al primo
+# build di Next.js, con un `signal: killed` che non spiega nulla.
+RAM_MB="$(free -m | awk '/^Mem:/  {print $2}')"
+SWAP_MB="$(free -m | awk '/^Swap:/ {print $2}')"
+
+# Il picco del build Next.js sta intorno ai 2-3 GB. Su una macchina con poca
+# RAM la swap deve coprire la differenza, non semplicemente esistere.
+REQUIRED_SWAP_MB=4096
+(( RAM_MB >= 4096 )) && REQUIRED_SWAP_MB=2048
+
+log "RAM ${RAM_MB} MB, swap attuale ${SWAP_MB} MB, necessaria ${REQUIRED_SWAP_MB} MB"
+
+if (( SWAP_MB >= REQUIRED_SWAP_MB )); then
+  ok "Swap sufficiente (${SWAP_MB} MB)"
+elif swapon --show | grep -q '^/swapfile'; then
+  warn "Lo swapfile esiste ma è di soli ${SWAP_MB} MB."
+  warn "Ridimensionalo a mano: swapoff /swapfile && rm /swapfile, poi rilancia questo script."
 else
-  # 2 GB: il picco di memoria del build Next.js è quello che fa fallire i
-  # deploy sulle VPS piccole, e succede una volta ogni tanto, non di continuo.
-  log "Creazione di 2 GB di swap"
-  fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  # Lo swapfile si AGGIUNGE alla partizione esistente: Linux usa entrambi.
+  SWAP_FILE_GB=$(( (REQUIRED_SWAP_MB - SWAP_MB + 1023) / 1024 ))
+  log "Creazione di ${SWAP_FILE_GB} GB di swapfile (in aggiunta ai ${SWAP_MB} MB esistenti)"
+
+  DISK_FREE_GB="$(df --output=avail -BG / | tail -1 | tr -dc '0-9')"
+  if (( DISK_FREE_GB < SWAP_FILE_GB + 5 )); then
+    die "Spazio disco insufficiente: servono ${SWAP_FILE_GB} GB per la swap più 5 GB di margine, liberi ${DISK_FREE_GB} GB."
+  fi
+
+  fallocate -l "${SWAP_FILE_GB}G" /swapfile \
+    || dd if=/dev/zero of=/swapfile bs=1M count=$(( SWAP_FILE_GB * 1024 )) status=none
   chmod 0600 /swapfile
   mkswap /swapfile >/dev/null
   swapon /swapfile
@@ -290,7 +316,8 @@ else
   # Swappiness bassa: usa la swap come rete di sicurezza, non come RAM lenta.
   sysctl -qw vm.swappiness=10
   grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
-  ok "Swap di 2 GB attiva (swappiness 10)"
+
+  ok "Swap totale $(free -m | awk '/^Swap:/ {print $2}') MB (swappiness 10)"
 fi
 
 # ---------------------------------------------------------------------------

@@ -174,7 +174,10 @@ rollback() {
   git checkout --force "$PREVIOUS_SHA" --quiet
 
   log "Ricostruzione dell'immagine precedente"
-  IMAGE_TAG="$PREVIOUS_SHORT" compose build --quiet web worker || true
+  # Sequenziale anche qui: un rollback che viene ucciso dall'OOM killer
+  # lascerebbe il sistema in uno stato peggiore di quello da cui si scappava.
+  IMAGE_TAG="$PREVIOUS_SHORT" compose build --quiet worker || true
+  IMAGE_TAG="$PREVIOUS_SHORT" compose build --quiet web    || true
 
   log "Riavvio dei container"
   IMAGE_TAG="$PREVIOUS_SHORT" compose up -d --remove-orphans
@@ -210,7 +213,38 @@ log "Il container attuale continua a servire traffico durante il build"
 # Il tag è lo SHA del commit: è ciò che rende il rollback una riga di comando
 # invece di una ricostruzione da sorgente.
 export IMAGE_TAG="$TARGET_SHORT"
-compose build web worker
+
+# --- Verifica preventiva della memoria disponibile ---------------------------
+# Il server ha 1 GB di RAM e un solo core. Il picco di minificazione di Next.js
+# lo supera: senza swap il build viene ucciso dall'OOM killer a metà, con un
+# messaggio (`signal: killed`) che non dice nulla di utile. Peggio: l'OOM
+# killer sceglie il processo più grosso, che potrebbe essere Postgres o
+# un'ALTRA applicazione sulla stessa macchina.
+SWAP_TOTAL_MB="$(free -m | awk '/^Swap:/ {print $2}')"
+if (( SWAP_TOTAL_MB < 2048 )); then
+  die "Swap insufficiente (${SWAP_TOTAL_MB} MB): il build verrebbe ucciso dall'OOM killer.
+       Attiva almeno 4 GB:
+         fallocate -l 6G /swapfile && chmod 600 /swapfile
+         mkswap /swapfile && swapon /swapfile
+         echo '/swapfile none swap sw 0 0' >> /etc/fstab"
+fi
+
+# --- Build SEQUENZIALE, un servizio alla volta --------------------------------
+# `compose build web worker` li costruisce in PARALLELO: due toolchain Node
+# contemporanee su 1 GB di RAM sono la causa diretta dell'OOM. In sequenza il
+# build è più lungo di qualche minuto ma arriva in fondo.
+#
+# Il worker viene fermato prima: durante il build non ha nulla da fare e la
+# sua memoria serve altrove. Il web resta acceso e continua a servire traffico.
+log "Arresto temporaneo del worker per liberare memoria"
+compose stop worker >/dev/null 2>&1 || true
+
+log "Build del worker (1/2)"
+compose build worker
+
+log "Build del web (2/2) — è la fase più pesante, può richiedere parecchi minuti"
+compose build web
+
 ok "Immagini costruite con tag ${TARGET_SHORT}"
 
 # ---------------------------------------------------------------------------

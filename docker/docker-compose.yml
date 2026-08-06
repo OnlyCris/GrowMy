@@ -182,6 +182,13 @@ services:
       POSTGRES_DB: growmy
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # 01-roles.sql legge queste due direttamente dall'ambiente per impostare
+      # le password di app_worker e app_migrator. Senza di esse lo script
+      # ricade silenziosamente su POSTGRES_PASSWORD (il suo `${VAR:-default}`),
+      # e i due ruoli finiscono con la stessa password di app_user — divergente
+      # da quella che web/worker usano per connettersi.
+      POSTGRES_WORKER_PASSWORD: ${POSTGRES_WORKER_PASSWORD}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD}
       # `scram-sha-256`: md5 è deprecato e vulnerabile.
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
