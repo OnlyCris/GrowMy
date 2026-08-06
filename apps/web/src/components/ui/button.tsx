@@ -92,13 +92,27 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         aria-busy={isLoading || undefined}
         {...props}
       >
-        {isLoading ? (
+        {asChild ? (
+          // Radix `Slot` richiede ESATTAMENTE un elemento React come
+          // `children` (`React.isValidElement`, non un array). Due espressioni
+          // JSX distinte — lo spinner condizionale e `children` — producono
+          // sempre un array a runtime, anche quando la prima vale `null`:
+          // `Slot` la rifiuta comunque. Con `asChild` il chiamante fornisce
+          // già l'unico figlio (tipicamente un `<Link>`); lo spinner non ha
+          // un posto dove stare in questa modalità — Slot fonde le props
+          // (incluso `aria-busy`) sul figlio, ma non può iniettarne un altro.
+          children
+        ) : (
           <>
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            <span className="sr-only">{loadingLabel}</span>
+            {isLoading ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                <span className="sr-only">{loadingLabel}</span>
+              </>
+            ) : null}
+            {children}
           </>
-        ) : null}
-        {children}
+        )}
       </Comp>
     );
   },
