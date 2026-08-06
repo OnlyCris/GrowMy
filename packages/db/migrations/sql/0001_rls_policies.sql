@@ -17,8 +17,24 @@
 --                    scope dal payload del job e non espone mai dati a un client.
 --   - `app_migrator`: usata solo da drizzle-kit in fase di deploy.
 --
--- Il claim di sessione `auth.uid()` è fornito da Supabase Auth a partire dal JWT
--- verificato: non è manipolabile dal client senza invalidare la firma.
+-- PERCHÉ NON `auth.uid()`
+--
+-- La versione precedente di questo file leggeva l'utente da `auth.uid()`, la
+-- funzione che Supabase Postgres espone a partire dai claim del JWT verificato.
+-- In questo deploy l'autenticazione (Supabase Auth, `auth.users`) vive in un
+-- progetto Supabase Cloud separato, mentre lo schema applicativo (`public.*`,
+-- comprese queste tabelle) vive in un Postgres self-hosted sulla stessa rete
+-- Docker del worker. Sono due server fisici distinti: `auth.uid()` non esiste
+-- affatto qui, non è un problema di permessi.
+--
+-- L'identità arriva invece da `app_current_user_id()`, che legge una variabile
+-- di sessione (`app.current_user_id`) impostata UNA VOLTA per transazione da
+-- `withUserContext()` (`packages/db/src/context.ts`) con `set_config(...)`, mai
+-- da testo SQL costruito a mano. Il valore che ci finisce è sempre l'id
+-- verificato da `supabase.auth.getUser()` lato server — mai un input del client.
+-- È lo stesso principio già applicato in `0003_enqueue_job.sql` (che passa l'id
+-- come parametro di funzione invece che leggerlo da `auth.uid()`), esteso qui
+-- alle policy, che non possono ricevere parametri dalla query che le innesca.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -30,6 +46,19 @@ CREATE EXTENSION IF NOT EXISTS "vector";    -- embedding + indici HNSW
 -- ---------------------------------------------------------------------------
 -- Funzioni helper
 -- ---------------------------------------------------------------------------
+
+-- Identità dell'utente corrente per QUESTA transazione. `NULLIF(..., '')`
+-- fa sì che una variabile mai impostata (fuori da `withUserContext`) risulti
+-- NULL invece di far fallire il cast — ogni policy valuta semplicemente falso,
+-- cioè fallisce chiuso.
+CREATE OR REPLACE FUNCTION app_current_user_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+  SELECT NULLIF(current_setting('app.current_user_id', true), '')::uuid;
+$$;
 
 -- Elenco delle organizzazioni a cui l'utente corrente appartiene.
 -- STABLE + SECURITY DEFINER: valutata una sola volta per statement e capace di
@@ -43,7 +72,7 @@ SET search_path = public
 AS $$
   SELECT om.organization_id
   FROM organization_members om
-  WHERE om.user_id = auth.uid();
+  WHERE om.user_id = app_current_user_id();
 $$;
 
 -- Vero se l'utente corrente ha nell'organizzazione un ruolo fra quelli richiesti.
@@ -57,7 +86,7 @@ AS $$
   SELECT EXISTS (
     SELECT 1
     FROM organization_members om
-    WHERE om.user_id = auth.uid()
+    WHERE om.user_id = app_current_user_id()
       AND om.organization_id = target_org
       AND om.role = ANY(allowed_roles)
   );
@@ -75,9 +104,11 @@ AS $$
   SELECT p.organization_id FROM products p WHERE p.id = target_product;
 $$;
 
+REVOKE EXECUTE ON FUNCTION app_current_user_id() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app_current_org_ids() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app_has_org_role(uuid, org_role[]) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION app_org_of_product(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_current_user_id() TO app_user;
 GRANT EXECUTE ON FUNCTION app_current_org_ids() TO app_user;
 GRANT EXECUTE ON FUNCTION app_has_org_role(uuid, org_role[]) TO app_user;
 GRANT EXECUTE ON FUNCTION app_org_of_product(uuid) TO app_user;
@@ -111,7 +142,7 @@ $$;
 -- ---------------------------------------------------------------------------
 CREATE POLICY users_select ON users FOR SELECT TO app_user
 USING (
-  id = auth.uid()
+  id = app_current_user_id()
   OR EXISTS (
     SELECT 1 FROM organization_members om
     WHERE om.user_id = users.id
@@ -119,11 +150,19 @@ USING (
   )
 );
 
--- L'utente può aggiornare solo il proprio profilo. La colonna `id` non è
--- modificabile: nessuna policy consente INSERT (la riga nasce da trigger).
+-- L'utente può aggiornare solo il proprio profilo.
 CREATE POLICY users_update_self ON users FOR UPDATE TO app_user
-USING (id = auth.uid())
-WITH CHECK (id = auth.uid());
+USING (id = app_current_user_id())
+WITH CHECK (id = app_current_user_id());
+
+-- Provisioning al primo accesso: nessun trigger su `auth.users` può crearla per
+-- noi (vive in un altro database), quindi l'applicazione la inserisce da sé al
+-- primo login (`ensureUserProvisioned`, dentro `withUserContext`). L'unica riga
+-- che questa policy permette di creare è la PROPRIA: `id` è sempre l'id
+-- verificato server-side che ha aperto la transazione, mai un valore scelto dal
+-- client.
+CREATE POLICY users_insert_self ON users FOR INSERT TO app_user
+WITH CHECK (id = app_current_user_id());
 
 -- ---------------------------------------------------------------------------
 -- ORGANIZATIONS
@@ -139,6 +178,23 @@ WITH CHECK (app_has_org_role(id, ARRAY['owner','admin']::org_role[]));
 CREATE POLICY organizations_delete ON organizations FOR DELETE TO app_user
 USING (app_has_org_role(id, ARRAY['owner']::org_role[]));
 
+-- Chiunque può creare una nuova organizzazione, ma solo dichiarandosi
+-- immediatamente proprietario di sé stesso — mai di un altro utente. Nessun
+-- tetto al numero di organizzazioni per utente: non è compito di RLS, è compito
+-- del rate limiting applicativo (`onboarding.create-organization`).
+CREATE POLICY organizations_insert_self_owner ON organizations FOR INSERT TO app_user
+WITH CHECK (owner_id = app_current_user_id());
+
+-- `organizations_update` (sopra) consente a owner/admin di aggiornare la riga,
+-- ma RLS è per riga, non per colonna: senza questo, un ADMIN potrebbe riassegnare
+-- `owner_id` con una UPDATE qualsiasi. Il trasferimento di proprietà è un'azione
+-- distinta e sensibile che merita un flusso dedicato e auditato (sul modello di
+-- `app_enqueue_job`, non costruito in questo passo) — per ora la colonna è
+-- semplicemente non scrivibile dall'applicazione. `slug` è immutabile per
+-- decisione di prodotto (vedi commento su `organizations.slug` in identity.ts).
+REVOKE UPDATE ON organizations FROM app_user;
+GRANT UPDATE (name, logo_url, deleted_at) ON organizations TO app_user;
+
 -- ---------------------------------------------------------------------------
 -- ORGANIZATION MEMBERS — gestione membri riservata a owner/admin
 -- ---------------------------------------------------------------------------
@@ -148,6 +204,41 @@ USING (organization_id IN (SELECT app_current_org_ids()));
 CREATE POLICY org_members_write ON organization_members FOR ALL TO app_user
 USING (app_has_org_role(organization_id, ARRAY['owner','admin']::org_role[]))
 WITH CHECK (app_has_org_role(organization_id, ARRAY['owner','admin']::org_role[]));
+
+-- BOOTSTRAP: la riga di membership dell'owner, alla creazione di una nuova
+-- organizzazione, è l'unico caso in cui `org_members_write` non basta — richiede
+-- di essere GIÀ owner/admin di quell'organizzazione, il che è circolare per la
+-- primissima riga. Questa policy apre un varco stretto e non aggirabile:
+--
+--   - `user_id = app_current_user_id()`: puoi inserire solo TE STESSO, mai un
+--     altro utente.
+--   - `role = 'owner'`: nessun altro ruolo soddisfa questa policy — non è un
+--     modo per auto-promuoversi con un ruolo diverso.
+--   - `o.owner_id = app_current_user_id()`: l'organizzazione bersaglio deve
+--     essere una che possiedi già (creata un istante prima nella stessa
+--     transazione da `organizations_insert_self_owner`) — non un'organizzazione
+--     esistente di qualcun altro.
+--   - `NOT EXISTS (... existing membership ...)`: vale solo se l'organizzazione
+--     non ha ancora NESSUN membro. Race-safe: creazione dell'org e inserimento
+--     di questa riga avvengono nella stessa transazione applicativa
+--     (`createOrganizationAction`), quindi nessun'altra sessione può mai
+--     osservare l'organizzazione prima che la sua membership owner sia già
+--     committata insieme.
+CREATE POLICY org_members_insert_bootstrap_owner ON organization_members
+FOR INSERT TO app_user
+WITH CHECK (
+  user_id = app_current_user_id()
+  AND role = 'owner'
+  AND EXISTS (
+    SELECT 1 FROM organizations o
+    WHERE o.id = organization_members.organization_id
+      AND o.owner_id = app_current_user_id()
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM organization_members existing
+    WHERE existing.organization_id = organization_members.organization_id
+  )
+);
 
 -- ---------------------------------------------------------------------------
 -- INVITATIONS / API KEYS — owner e admin
@@ -182,8 +273,8 @@ WITH CHECK (organization_id IN (SELECT app_current_org_ids()));
 -- USER PREFERENCES
 -- ---------------------------------------------------------------------------
 CREATE POLICY user_preferences_all ON user_preferences FOR ALL TO app_user
-USING (user_id = auth.uid())
-WITH CHECK (user_id = auth.uid());
+USING (user_id = app_current_user_id())
+WITH CHECK (user_id = app_current_user_id());
 
 -- ---------------------------------------------------------------------------
 -- PRODUCTS e tabelle figlie con organization_id diretto
@@ -336,9 +427,10 @@ REVOKE ALL ON rate_limit_violations FROM app_user;
 -- SECURITY DEFINER `app_enqueue_job()`, definita in 0003_enqueue_job.sql.
 --
 -- Sta in un file separato perché serve in OGNI ambiente, mentre queste policy
--- richiedono i ruoli e lo schema `auth` di Supabase, che in sviluppo locale
--- non esistono. Tenerla qui la rendeva applicabile solo in produzione — cioè
--- non testabile.
+-- richiedono i ruoli applicativi (app_user/app_worker), che in sviluppo locale
+-- vanno comunque creati da `postgres/init/01-roles.sql` prima di poterle
+-- applicare. Tenerla qui la rendeva applicabile solo dopo quel setup — separarla
+-- la rende testabile anche prima che i ruoli esistano.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------

@@ -129,37 +129,23 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------
--- Trigger: creazione del profilo applicativo al signup Supabase.
--- SECURITY DEFINER perché deve scrivere in `public` reagendo a `auth.users`.
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION app_handle_new_auth_user()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  INSERT INTO users (id, email, full_name, avatar_url)
-  VALUES (
-    NEW.id,
-    NEW.email,
-    NEW.raw_user_meta_data ->> 'full_name',
-    NEW.raw_user_meta_data ->> 'avatar_url'
-  )
-  ON CONFLICT (id) DO NOTHING;
-
-  INSERT INTO user_preferences (user_id)
-  VALUES (NEW.id)
-  ON CONFLICT (user_id) DO NOTHING;
-
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION app_handle_new_auth_user();
-
+-- NIENTE trigger `ON auth.users` qui.
+--
+-- La versione precedente di questo file ne dichiarava uno per creare la riga
+-- `public.users` (+ `user_preferences`) a ogni signup Supabase. Impossibile in
+-- questo deploy: `auth.users` vive nel progetto Supabase Cloud che gestisce
+-- l'autenticazione, `public.*` vive in un Postgres self-hosted separato sulla
+-- stessa rete Docker del worker — due server fisici distinti. Un trigger non
+-- può scavalcare quel confine indipendentemente da come lo si scrive.
+--
+-- Il rimpiazzo è applicativo: `ensureUserProvisioned()`
+-- (`apps/web/src/lib/auth/provision-user.ts`) fa lo stesso upsert, dentro
+-- `withUserContext`, chiamato dopo ogni exchange OAuth riuscito
+-- (`auth/callback/route.ts`) e all'ingresso di `/onboarding` — quest'ultimo è
+-- il percorso che conta davvero, perché un login email/password senza conferma
+-- via link non passa mai dal callback. La policy `users_insert_self` in
+-- `0001_rls_policies.sql` è ciò che permette a quell'insert di avere successo
+-- sotto RLS.
 -- ---------------------------------------------------------------------------
 -- Protezione: un'organizzazione deve sempre avere almeno un owner.
 -- Impedisce il lockout permanente causato da un declassamento accidentale.

@@ -1,3 +1,4 @@
+import { withUserContext } from '@growmy/db/context';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
@@ -66,17 +67,32 @@ async function ReviewQueueLoader({ orgSlug }: { orgSlug: string }) {
   // I `viewer` non possono approvare nulla: la coda non ha senso per loro.
   if (membership.role === 'viewer') notFound();
 
-  const items = await getReviewQueue(membership.organizationId);
+  /**
+   * `requireOrgMembership` (sopra) ha già aperto e chiuso il proprio
+   * `withUserContext` per risolvere la membership. Queste due query sono un
+   * secondo, distinto accesso ai dati per conto dello stesso utente: senza un
+   * proprio contesto, girerebbero sulla connessione `rawDb` di base, dove
+   * `app.current_user_id` non è mai impostata — RLS le farebbe fallire chiuse
+   * (coda sempre vuota), non con un errore che lo spieghi.
+   */
+  const { items, previousVersions } = await withUserContext(
+    membership.userId,
+    async () => {
+      const items = await getReviewQueue(membership.organizationId);
 
-  // Il diff richiede il markdown precedente. Lo carichiamo solo per le bozze
-  // effettivamente in coda, non per l'intero storico.
-  const previousVersions = await getPreviousVersionsMarkdown(
-    items
-      .filter((item) => item.draft?.previousVersionId)
-      .map((item) => ({
-        articleId: item.articleId,
-        versionId: item.draft!.previousVersionId!,
-      })),
+      // Il diff richiede il markdown precedente. Lo carichiamo solo per le
+      // bozze effettivamente in coda, non per l'intero storico.
+      const previousVersions = await getPreviousVersionsMarkdown(
+        items
+          .filter((item) => item.draft?.previousVersionId)
+          .map((item) => ({
+            articleId: item.articleId,
+            versionId: item.draft!.previousVersionId!,
+          })),
+      );
+
+      return { items, previousVersions };
+    },
   );
 
   return (

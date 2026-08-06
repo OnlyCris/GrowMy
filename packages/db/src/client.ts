@@ -2,6 +2,7 @@ import { env, isProduction } from '@growmy/env';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
+import { requestDbContext } from './request-context';
 import * as schema from './schema';
 
 /**
@@ -75,16 +76,58 @@ const pool =
 if (!isProduction) globalForDb.__growmyPool = pool;
 
 /**
- * Client applicativo. Passare `schema` è ciò che abilita l'inferenza dei tipi
- * su ogni query e la Relational Query API (`db.query.articles.findMany`).
+ * Client applicativo "grezzo". Passare `schema` è ciò che abilita l'inferenza
+ * dei tipi su ogni query e la Relational Query API (`db.query.articles.findMany`).
+ *
+ * Non esportato per uso diretto (eccetto da `context.ts`, che ne apre le
+ * transazioni): connette come `app_user`, con RLS forzato. Usato fuori da
+ * `withUserContext` (`@growmy/db/context`), `app.current_user_id` non è mai
+ * impostata, quindi ogni policy RLS valuta falso — fallisce CHIUSO (zero
+ * righe, scritture rifiutate), mai un leak. Per questo non serve la stessa
+ * guardia a runtime di `getWorkerDb()`, che invece bypassa RLS del tutto.
  */
-export const db = drizzle(pool, {
+const rawDb = drizzle(pool, {
   schema,
   // In sviluppo logga l'SQL generato: rende immediato accorgersi di un N+1.
   logger: !isProduction,
 });
 
-export type Database = typeof db;
+export { rawDb };
+export type Database = typeof rawDb;
+
+/**
+ * Tipo della transazione aperta da `rawDb.transaction()`. Derivato invece che
+ * importato da `drizzle-orm/node-postgres` per non dover riprodurre a mano i
+ * parametri generici dello schema: qualunque essi siano, sono questi.
+ */
+export type Transaction = Parameters<typeof rawDb.transaction>[0] extends (
+  tx: infer Tx,
+) => unknown
+  ? Tx
+  : never;
+
+/**
+ * Client applicativo. Fuori da `withUserContext` si comporta esattamente come
+ * `rawDb`. Dentro, ogni chiamata (`db.select`, `db.insert`, `db.transaction`, …)
+ * viene inoltrata alla transazione della richiesta corrente, così le query
+ * dell'ORM vedono la stessa connessione su cui `withUserContext` ha impostato
+ * `app.current_user_id` — RLS altrimenti non avrebbe alcun contesto da leggere.
+ *
+ * Il Proxy è trasparente: nessun call site esistente deve sapere che `db` non
+ * è più l'istanza diretta.
+ */
+export const db: Database = new Proxy(rawDb, {
+  get(target, prop) {
+    const active = requestDbContext.getStore()?.tx ?? target;
+    // Receiver esplicito = `active`, non il Proxy: un eventuale getter interno
+    // di drizzle che legge `this` deve vedere l'istanza reale.
+    const value = Reflect.get(active, prop, active);
+    // `.bind(active)`: i metodi drizzle leggono lo stato interno via `this`.
+    // Senza rebind, chiamarli sul Proxy passerebbe `this` = Proxy invece che
+    // l'istanza reale, rompendo silenziosamente i metodi che ne dipendono.
+    return typeof value === 'function' ? value.bind(active) : value;
+  },
+});
 
 /**
  * Client del worker. Accessibile solo se `DATABASE_WORKER_URL` è configurata,

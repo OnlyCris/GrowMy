@@ -1,4 +1,5 @@
 import { db, organizationMembers, organizations } from '@growmy/db';
+import { withUserContext } from '@growmy/db/context';
 import { and, eq, isNull } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
@@ -55,36 +56,38 @@ export const getOrgMembership = cache(
     const user = await getAuthenticatedUser();
     if (!user) return null;
 
-    const [row] = await db
-      .select({
-        organizationId: organizations.id,
-        organizationSlug: organizations.slug,
-        organizationName: organizations.name,
-        role: organizationMembers.role,
-      })
-      .from(organizationMembers)
-      .innerJoin(
-        organizations,
-        eq(organizations.id, organizationMembers.organizationId),
-      )
-      .where(
-        and(
-          eq(organizationMembers.userId, user.id),
-          eq(organizations.slug, orgSlug),
-          isNull(organizations.deletedAt),
-        ),
-      )
-      .limit(1);
+    return withUserContext(user.id, async () => {
+      const [row] = await db
+        .select({
+          organizationId: organizations.id,
+          organizationSlug: organizations.slug,
+          organizationName: organizations.name,
+          role: organizationMembers.role,
+        })
+        .from(organizationMembers)
+        .innerJoin(
+          organizations,
+          eq(organizations.id, organizationMembers.organizationId),
+        )
+        .where(
+          and(
+            eq(organizationMembers.userId, user.id),
+            eq(organizations.slug, orgSlug),
+            isNull(organizations.deletedAt),
+          ),
+        )
+        .limit(1);
 
-    if (!row) return null;
+      if (!row) return null;
 
-    return {
-      userId: user.id,
-      organizationId: row.organizationId,
-      organizationSlug: row.organizationSlug,
-      organizationName: row.organizationName,
-      role: row.role,
-    };
+      return {
+        userId: user.id,
+        organizationId: row.organizationId,
+        organizationSlug: row.organizationSlug,
+        organizationName: row.organizationName,
+        role: row.role,
+      };
+    });
   },
 );
 
@@ -103,12 +106,23 @@ export async function requireOrgMembership(
 }
 
 /**
+ * Un percorso relativo è "sicuro" da usare come destinazione di redirect solo
+ * se inizia con `/` e non con `//`: `//evil.com` è sintatticamente relativo ma
+ * il browser lo risolve come `https://evil.com`, cioè un open redirect verso
+ * un dominio di phishing. Esportata perché sia `requireSession` sia
+ * `auth/callback/route.ts` devono applicare la stessa regola sullo stesso
+ * parametro (`redirectTo`) — un solo posto in cui può sbagliarsi.
+ */
+export function isSafeRelativePath(path: string | null | undefined): path is string {
+  return (
+    typeof path === 'string' && path.startsWith('/') && !path.startsWith('//')
+  );
+}
+
+/**
  * Variante per i layout dell'area autenticata: se non c'è sessione manda al
  * login conservando la destinazione, così dopo l'accesso l'utente atterra dove
  * voleva andare.
- *
- * `redirectTo` è un percorso relativo validato: accettare un URL assoluto
- * aprirebbe una open redirect verso un dominio di phishing.
  */
 export async function requireSession(currentPath?: string): Promise<{
   userId: string;
@@ -117,13 +131,8 @@ export async function requireSession(currentPath?: string): Promise<{
   const user = await getAuthenticatedUser();
 
   if (!user) {
-    const isSafeRelativePath =
-      typeof currentPath === 'string' &&
-      currentPath.startsWith('/') &&
-      !currentPath.startsWith('//');
-
     redirect(
-      isSafeRelativePath
+      isSafeRelativePath(currentPath)
         ? `/signin?redirectTo=${encodeURIComponent(currentPath)}`
         : '/signin',
     );
@@ -189,25 +198,28 @@ export async function assertOrgRoleById(
     throw new AuthorizationError('UNAUTHENTICATED', 'Sessione non valida.');
   }
 
-  const [row] = await db
-    .select({
-      role: organizationMembers.role,
-      organizationSlug: organizations.slug,
-      organizationName: organizations.name,
-    })
-    .from(organizationMembers)
-    .innerJoin(
-      organizations,
-      eq(organizations.id, organizationMembers.organizationId),
-    )
-    .where(
-      and(
-        eq(organizationMembers.userId, user.id),
-        eq(organizationMembers.organizationId, organizationId),
-        isNull(organizations.deletedAt),
-      ),
-    )
-    .limit(1);
+  const row = await withUserContext(user.id, async () => {
+    const [membershipRow] = await db
+      .select({
+        role: organizationMembers.role,
+        organizationSlug: organizations.slug,
+        organizationName: organizations.name,
+      })
+      .from(organizationMembers)
+      .innerJoin(
+        organizations,
+        eq(organizations.id, organizationMembers.organizationId),
+      )
+      .where(
+        and(
+          eq(organizationMembers.userId, user.id),
+          eq(organizationMembers.organizationId, organizationId),
+          isNull(organizations.deletedAt),
+        ),
+      )
+      .limit(1);
+    return membershipRow;
+  });
 
   if (!row) {
     throw new AuthorizationError('NOT_FOUND', 'Risorsa non trovata.');

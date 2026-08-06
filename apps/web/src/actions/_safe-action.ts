@@ -1,10 +1,11 @@
 import { auditLogs, db } from '@growmy/db';
+import { withUserContext } from '@growmy/db/context';
 import { headers } from 'next/headers';
 import type { z } from 'zod';
 
 import {
-  AuthorizationError,
   assertOrgRoleById,
+  AuthorizationError,
   type OrgMembership,
   type OrgRole,
 } from '@/lib/auth/guards';
@@ -15,7 +16,13 @@ import {
   type RateLimitScope,
 } from '@/lib/rate-limit';
 import { getAuthenticatedUser } from '@/lib/supabase/server';
-import type { ActionErrorCode, ActionResult } from '@/types/review';
+import type { ActionResult } from '@/types/review';
+
+import { ActionError, fail, handleError } from './_action-result';
+
+// Re-esportato: `review.impl.ts` importa `ActionError` da qui, non da
+// `_action-result.ts` — questo mantiene quell'import invariato.
+export { ActionError };
 
 /**
  * WRAPPER UNICO PER LE SERVER ACTIONS
@@ -35,6 +42,12 @@ import type { ActionErrorCode, ActionResult } from '@/types/review';
  * perché una query al database è precisamente il costo che vogliamo evitare a
  * un attaccante. Il controllo RBAC precede la validazione perché non ha senso
  * spendere cicli a validare il payload di chi non è autorizzato comunque.
+ *
+ * I passi 3–6 girano dentro un solo `withUserContext` (`@growmy/db/context`):
+ * serve per RLS (le policy leggono `app.current_user_id`, impostata lì), e
+ * come effetto collaterale rende l'intero blocco una transazione — se
+ * l'handler lancia a metà di più scritture, tutto fa rollback, riga di audit
+ * inclusa.
  *
  * REGOLA INVIOLABILE: nessuna eccezione grezza raggiunge il client. Lo stack
  * trace va al logger con un `traceId`; l'utente riceve un messaggio leggibile e
@@ -69,18 +82,6 @@ type Handler<TInput extends z.ZodTypeAny, TOutput> = (args: {
   membership: OrgMembership;
   traceId: string;
 }) => Promise<TOutput>;
-
-/** Errore di dominio sollevabile dagli handler con un codice esplicito. */
-export class ActionError extends Error {
-  constructor(
-    public readonly code: ActionErrorCode,
-    message: string,
-    public readonly fieldErrors?: Record<string, string[]>,
-  ) {
-    super(message);
-    this.name = 'ActionError';
-  }
-}
 
 export function createSafeAction<TInput extends z.ZodTypeAny, TOutput>(
   config: ActionConfig<TInput>,
@@ -128,36 +129,52 @@ export function createSafeAction<TInput extends z.ZodTypeAny, TOutput>(
       }
       const input = parsed.data as z.infer<TInput>;
 
-      // --- 4. Tenant + RBAC ------------------------------------------------
-      const organizationId = await config.resolveTenant(input);
-      if (!organizationId) {
-        // 404 e non 403: non confermiamo l'esistenza di risorse altrui.
-        return fail('NOT_FOUND', 'Risorsa non trovata.');
-      }
+      /**
+       * --- 4–6. Tenant + RBAC + esecuzione + audit, in UNA transazione -----
+       *
+       * `withUserContext` apre la transazione su cui RLS ha qualcosa da
+       * leggere (imposta `app.current_user_id`) — senza, `resolveTenant`,
+       * `assertOrgRoleById` e l'insert di audit vedrebbero tutti zero righe.
+       *
+       * Avvolgere anche l'handler, non solo le query di guardia, è un
+       * cambiamento di comportamento voluto oltre che necessario per RLS: oggi
+       * nessuna transazione racchiude l'handler, quindi un errore a metà di
+       * scritture multiple non fa rollback di nulla. Da qui in poi sì —
+       * un'eccezione (incluso `ActionError`) annulla tutto ciò che l'handler
+       * aveva già scritto, riga di audit inclusa. `user` è quello verificato
+       * al passo 1: nessuna nuova chiamata a Supabase qui.
+       */
+      const { membership, output } = await withUserContext(user.id, async () => {
+        const organizationId = await config.resolveTenant(input);
+        if (!organizationId) {
+          // 404 e non 403: non confermiamo l'esistenza di risorse altrui.
+          throw new AuthorizationError('NOT_FOUND', 'Risorsa non trovata.');
+        }
 
-      const membership = await assertOrgRoleById(
-        organizationId,
-        config.minimumRole,
-      );
+        const membership = await assertOrgRoleById(
+          organizationId,
+          config.minimumRole,
+        );
 
-      // --- 5. Esecuzione ---------------------------------------------------
-      const output = await handler({ input, membership, traceId });
+        const output = await handler({ input, membership, traceId });
 
-      // --- 6. Audit --------------------------------------------------------
-      if (config.audit) {
-        const requestHeaders = await headers();
-        await db.insert(auditLogs).values({
-          organizationId: membership.organizationId,
-          actorUserId: membership.userId,
-          action: config.name,
-          targetType: config.audit.targetType,
-          targetId: config.audit.getTargetId(input),
-          // Solo metadati non sensibili: mai il payload completo, che può
-          // contenere testo scritto dall'utente.
-          metadata: { traceId },
-          ipPrefix: anonymousSubjectFromHeaders(requestHeaders).replace('ip:', ''),
-        });
-      }
+        if (config.audit) {
+          const requestHeaders = await headers();
+          await db.insert(auditLogs).values({
+            organizationId: membership.organizationId,
+            actorUserId: membership.userId,
+            action: config.name,
+            targetType: config.audit.targetType,
+            targetId: config.audit.getTargetId(input),
+            // Solo metadati non sensibili: mai il payload completo, che può
+            // contenere testo scritto dall'utente.
+            metadata: { traceId },
+            ipPrefix: anonymousSubjectFromHeaders(requestHeaders).replace('ip:', ''),
+          });
+        }
+
+        return { membership, output };
+      });
 
       logger.info(
         {
@@ -174,64 +191,5 @@ export function createSafeAction<TInput extends z.ZodTypeAny, TOutput>(
     } catch (error) {
       return handleError(error, config.name, traceId, startedAt);
     }
-  };
-}
-
-function fail(code: ActionErrorCode, message: string): ActionResult<never> {
-  return { ok: false, code, message };
-}
-
-/**
- * Converte qualunque eccezione in un risultato tipizzato.
- *
- * Gli errori attesi (autorizzazione, dominio) producono un messaggio utile.
- * Tutto il resto diventa un `INTERNAL_ERROR` generico: un messaggio di errore
- * dettagliato su un fallimento imprevisto è una fuga di informazione, perché
- * può rivelare nomi di tabelle, vincoli e struttura interna.
- */
-function handleError(
-  error: unknown,
-  actionName: string,
-  traceId: string,
-  startedAt: number,
-): ActionResult<never> {
-  const durationMs = Math.round(performance.now() - startedAt);
-
-  if (error instanceof AuthorizationError) {
-    logger.warn(
-      { traceId, action: actionName, code: error.code, durationMs },
-      'autorizzazione negata',
-    );
-    return { ok: false, code: error.code, message: error.message };
-  }
-
-  if (error instanceof ActionError) {
-    logger.warn(
-      { traceId, action: actionName, code: error.code, durationMs },
-      'errore di dominio',
-    );
-    return {
-      ok: false,
-      code: error.code,
-      message: error.message,
-      fieldErrors: error.fieldErrors,
-    };
-  }
-
-  // Imprevisto: stack trace SOLO nel log, mai nella risposta.
-  logger.error(
-    {
-      traceId,
-      action: actionName,
-      durationMs,
-      err: error instanceof Error ? { message: error.message, stack: error.stack } : error,
-    },
-    'errore non gestito in una server action',
-  );
-
-  return {
-    ok: false,
-    code: 'INTERNAL_ERROR',
-    message: `Qualcosa è andato storto. Se il problema persiste, cita questo codice al supporto: ${traceId.slice(0, 8)}`,
   };
 }
