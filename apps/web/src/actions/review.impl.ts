@@ -13,10 +13,11 @@ import {
   rewriteSectionInput,
   saveBriefInput,
 } from '@growmy/validation/review';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
 import { ActionError, createSafeAction } from '@/actions/_safe-action';
+import { enqueueJob, mapDatabaseError } from '@/lib/jobs';
 import {
   getArticleOrganizationId,
   getArticleState,
@@ -82,73 +83,6 @@ async function transitionArticle(params: {
       'Questo articolo è già stato gestito da qualcun altro. Ricarica la pagina.',
     );
   }
-}
-
-/**
- * Accodamento tramite la funzione SECURITY DEFINER.
- *
- * `userId` è ricavato dal wrapper `safe-action` a partire da
- * `supabase.auth.getUser()` — una verifica di firma lato server — e mai
- * dall'input del client. La funzione lo riverifica comunque contro
- * `organization_members`: un id arbitrario non basta ad accodare lavoro.
- */
-async function enqueueJob(params: {
-  userId: string;
-  organizationId: string;
-  productId: string;
-  type:
-    | 'article_research'
-    | 'article_generate'
-    | 'article_publish';
-  articleId: string;
-  payload: Record<string, unknown>;
-  /** Discriminante della chiave di idempotenza: distingue i tentativi legittimi. */
-  discriminator: string;
-  reserveCredit: boolean;
-  traceId: string;
-}): Promise<string> {
-  const idempotencyKey = `${params.type}:${params.articleId}:${params.discriminator}`;
-
-  const result = await db.execute(sql`
-    select app_enqueue_job(
-      ${params.userId}::uuid,
-      ${params.organizationId}::uuid,
-      ${params.productId}::uuid,
-      ${params.type}::job_type,
-      'article',
-      ${params.articleId}::uuid,
-      ${JSON.stringify(params.payload)}::jsonb,
-      ${idempotencyKey},
-      ${params.reserveCredit},
-      ${params.traceId}
-    ) as job_id
-  `);
-
-  const jobId = (result.rows[0] as { job_id: string } | undefined)?.job_id;
-  if (!jobId) {
-    throw new ActionError('INTERNAL_ERROR', 'Accodamento del lavoro non riuscito.');
-  }
-  return jobId;
-}
-
-/**
- * Traduce gli errori sollevati da `app_enqueue_job` in errori di dominio.
- * Postgres li restituisce come messaggi di eccezione; qui diventano codici
- * che la UI sa gestire.
- */
-function mapDatabaseError(error: unknown): never {
-  const message = error instanceof Error ? error.message : '';
-
-  if (message.includes('INSUFFICIENT_CREDITS')) {
-    throw new ActionError(
-      'INSUFFICIENT_CREDITS',
-      'Crediti esauriti per questo ciclo. Aggiorna il piano per continuare a generare.',
-    );
-  }
-  if (message.includes('FORBIDDEN') || message.includes('PRODUCT_ORG_MISMATCH')) {
-    throw new ActionError('FORBIDDEN', 'Operazione non consentita.');
-  }
-  throw error;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +165,8 @@ export const approveBrief = createSafeAction(
         organizationId: membership.organizationId,
         productId: state.productId,
         type: 'article_generate',
-        articleId: input.articleId,
+        targetType: 'article',
+        targetId: input.articleId,
         payload: { approvedBy: membership.userId },
         // Il timestamp di approvazione rende la chiave stabile per questo
         // tentativo: un doppio click accoda una volta sola.
@@ -282,7 +217,8 @@ export const rejectBrief = createSafeAction(
         organizationId: membership.organizationId,
         productId: state.productId,
         type: 'article_research',
-        articleId: input.articleId,
+        targetType: 'article',
+        targetId: input.articleId,
         payload: { humanFeedback: input.feedback, rejectedBy: membership.userId },
         discriminator: `brief-rejected-${Date.now()}`,
         reserveCredit: false,
@@ -347,7 +283,8 @@ export const approveDraft = createSafeAction(
         organizationId: membership.organizationId,
         productId: state.productId,
         type: 'article_publish',
-        articleId: input.articleId,
+        targetType: 'article',
+        targetId: input.articleId,
         payload: {
           versionId: state.currentVersionId,
           approvedBy: membership.userId,
@@ -399,7 +336,8 @@ export const rejectDraft = createSafeAction(
         organizationId: membership.organizationId,
         productId: state.productId,
         type: 'article_generate',
-        articleId: input.articleId,
+        targetType: 'article',
+        targetId: input.articleId,
         payload: {
           humanFeedback: input.feedback,
           rejectedBy: membership.userId,
@@ -454,7 +392,8 @@ export const rewriteSection = createSafeAction(
         organizationId: membership.organizationId,
         productId: state.productId,
         type: 'article_generate',
-        articleId: input.articleId,
+        targetType: 'article',
+        targetId: input.articleId,
         payload: {
           mode: 'section_rewrite',
           sectionHeading: input.sectionHeading,

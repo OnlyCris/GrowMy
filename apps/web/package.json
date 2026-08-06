@@ -15,6 +15,7 @@
     "@growmy/core": "workspace:*",
     "@growmy/db": "workspace:*",
     "@growmy/env": "workspace:*",
+    "@growmy/integrations": "workspace:*",
     "@growmy/logger": "workspace:*",
     "@growmy/validation": "workspace:*",
 

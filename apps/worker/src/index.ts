@@ -15,6 +15,7 @@ import {
 import { processArticleGenerate } from './processors/article-generate.processor';
 import { processArticlePublish } from './processors/article-publish.processor';
 import { processArticleResearch } from './processors/article-research.processor';
+import { processIntegrationConnect } from './processors/integration-connect.processor';
 import { processIntegrationHealth } from './processors/integration-health.processor';
 import {
   processApprovalTimeoutSweep,
@@ -91,7 +92,7 @@ async function enqueueJob(request: EnqueueRequest): Promise<string> {
       ${request.organizationId}::uuid,
       ${request.productId}::uuid,
       ${request.type}::job_type,
-      'article',
+      ${request.targetType ?? 'article'},
       ${request.targetId}::uuid,
       ${JSON.stringify(request.payload)}::jsonb,
       ${idempotencyKey},
@@ -123,6 +124,7 @@ const PROCESSORS: Record<string, Processor> = {
   article_generate: processArticleGenerate,
   article_publish: processArticlePublish,
   integration_health_check: processIntegrationHealth,
+  integration_connect: processIntegrationConnect,
 };
 
 /** Cron senza una riga in `jobs`: girano fuori dal ciclo di vita normale. */

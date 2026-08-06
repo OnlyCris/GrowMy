@@ -61,22 +61,31 @@ export default async function ProductsPage({ params }: ProductsPageProps) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((product) => (
-            <Link key={product.id} href={`/${orgSlug}/products/${product.id}/settings`}>
-              <Card className="flex flex-col gap-3 p-5 transition-shadow duration-150 hover:shadow-md">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className="text-sm font-semibold text-foreground">
-                      {product.name}
-                    </h2>
-                    <p className="text-xs text-foreground-muted">{product.domain}</p>
-                  </div>
-                  <ProductStatusBadge status={product.status} />
+            <Card key={product.id} className="flex flex-col gap-3 p-5">
+              <Link
+                href={`/${orgSlug}/products/${product.id}/settings`}
+                className="flex items-start justify-between gap-2"
+              >
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground hover:underline">
+                    {product.name}
+                  </h2>
+                  <p className="text-xs text-foreground-muted">{product.domain}</p>
                 </div>
+                <ProductStatusBadge status={product.status} />
+              </Link>
+              <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-foreground-subtle">
                   Aggiornato {formatRelativeTime(product.updatedAt)}
                 </p>
-              </Card>
-            </Link>
+                <Link
+                  href={`/${orgSlug}/products/${product.id}/articles`}
+                  className="text-xs text-info-700 underline underline-offset-4 hover:no-underline"
+                >
+                  Articoli
+                </Link>
+              </div>
+            </Card>
           ))}
         </div>
       )}

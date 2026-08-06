@@ -164,6 +164,14 @@ export const jobTypeEnum = pgEnum('job_type', [
   'integration_health_check',
   'gsc_sync',
   'planner_recalculate',
+  /**
+   * Cifra e salva le credenziali di una nuova integrazione (INSERT su
+   * `integrations`) — l'unico processo con `CREDENTIALS_ENCRYPTION_KEY` è il
+   * worker, quindi anche la primissima scrittura della riga passa da un job,
+   * non da una Server Action diretta. Vedi
+   * `apps/worker/src/processors/integration-connect.processor.ts`.
+   */
+  'integration_connect',
 ]);
 
 export const jobStatusEnum = pgEnum('job_status', [

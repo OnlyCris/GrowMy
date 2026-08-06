@@ -31,16 +31,14 @@ export default async function ProductSettingsPage({ params }: ProductSettingsPag
   if (!product) notFound();
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>{product.name}</CardTitle>
-          <CardDescription>{product.domain}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ProductSettingsForm product={product} />
-        </CardContent>
-      </Card>
-    </main>
+    <Card>
+      <CardHeader>
+        <CardTitle>{product.name}</CardTitle>
+        <CardDescription>{product.domain}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ProductSettingsForm product={product} />
+      </CardContent>
+    </Card>
   );
 }

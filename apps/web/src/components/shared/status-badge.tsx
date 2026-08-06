@@ -5,6 +5,7 @@ import {
   CircleDashed,
   Clock,
   FileText,
+  Lightbulb,
   Loader2,
   PauseCircle,
   PenLine,
@@ -277,6 +278,66 @@ export function ProductStatusBadge({
       )}
     >
       <Icon className="size-3.5" aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+/** Badge di stato della keyword. Stessa disciplina: icona + testo, mai solo colore. */
+export function KeywordStatusBadge({
+  status,
+  className,
+}: {
+  status: 'suggested' | 'approved' | 'scheduled' | 'processing' | 'done' | 'rejected';
+  className?: string;
+}) {
+  const map = {
+    suggested: {
+      label: 'Suggerita',
+      icon: Lightbulb,
+      cls: 'bg-surface-muted text-foreground-muted border-border',
+    },
+    approved: {
+      label: 'Approvata',
+      icon: CheckCircle2,
+      cls: 'bg-info-100 text-info-700 border-transparent',
+    },
+    scheduled: {
+      label: 'Schedulata',
+      icon: Clock,
+      cls: 'bg-info-100 text-info-700 border-transparent',
+    },
+    processing: {
+      label: 'In lavorazione',
+      icon: Loader2,
+      cls: 'bg-info-100 text-info-700 border-transparent',
+    },
+    done: {
+      label: 'Pubblicata',
+      icon: CheckCircle2,
+      cls: 'bg-success-100 text-success-700 border-transparent',
+    },
+    rejected: {
+      label: 'Scartata',
+      icon: XCircle,
+      cls: 'bg-surface-muted text-foreground-subtle border-border',
+    },
+  } as const;
+
+  const { label, icon: Icon, cls } = map[status];
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
+        cls,
+        className,
+      )}
+    >
+      <Icon
+        className={cn('size-3.5', status === 'processing' && 'animate-spin')}
+        aria-hidden="true"
+      />
       {label}
     </span>
   );

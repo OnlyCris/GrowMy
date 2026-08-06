@@ -37,11 +37,19 @@ export interface EnqueueRequest {
     | 'article_generate'
     | 'article_publish'
     | 'integration_health_check'
+    | 'integration_connect'
     | 'gsc_sync'
     | 'planner_recalculate';
   organizationId: string;
   productId: string | null;
   targetId: string | null;
+  /**
+   * Tipo dell'entità puntata da `targetId` (`'article'`, `'integration'`, ...).
+   * Opzionale con default `'article'`: tutti i call site esistenti puntano ad
+   * articoli, solo `integration_connect`/`integration_health_check` puntano
+   * altrove.
+   */
+  targetType?: string;
   payload: Record<string, unknown>;
   /** Discriminante della chiave di idempotenza. */
   discriminator: string;

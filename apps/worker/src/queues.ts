@@ -131,6 +131,7 @@ export function queueForJobType(type: string): QueueName {
     case 'article_publish':
       return QUEUE_NAMES.articlePublish;
     case 'integration_health_check':
+    case 'integration_connect':
       return QUEUE_NAMES.integrationHealth;
     case 'gsc_sync':
       return QUEUE_NAMES.gscSync;
