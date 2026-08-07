@@ -60,9 +60,14 @@ export const products = pgTable(
     /**
      * Se true la pipeline salta gli stati di attesa (`brief_ready`, `draft_ready`)
      * e procede in autopilota puro. Se false l'articolo si ferma e attende un umano.
+     *
+     * Default `false`: un cliente nuovo vede prima come scrive l'AI prima di
+     * fidarsene in autopilota — l'opposto del default precedente, cambiato
+     * dopo che i primi articoli reali sono finiti dritti in `approved` senza
+     * che nessuno li avesse mai controllati.
      */
-    autoApproveBrief: boolean('auto_approve_brief').notNull().default(true),
-    autoApproveDraft: boolean('auto_approve_draft').notNull().default(true),
+    autoApproveBrief: boolean('auto_approve_brief').notNull().default(false),
+    autoApproveDraft: boolean('auto_approve_draft').notNull().default(false),
     /**
      * Fallback anti-stallo: se nessuno approva entro N ore, la pipeline procede
      * comunque. NULL = attende indefinitamente. Evita che un utente in ferie
