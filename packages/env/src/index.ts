@@ -124,8 +124,17 @@ export const env = createEnv({
     GOOGLE_GENERATIVE_AI_API_KEY: z.string().startsWith('AIza').optional(),
 
     /**
+     * OpenRouter. Un solo endpoint OpenAI-compatibile davanti a decine di
+     * modelli di provider diversi — utile come fallback quando un provider
+     * diretto esaurisce quota o credito senza dover cambiare integrazione.
+     */
+    OPENROUTER_API_KEY: z.string().min(1).optional(),
+    /** Slug `provider/nome` (es. `openai/gpt-4o-mini`). Default nel router. */
+    OPENROUTER_MODEL: z.string().min(1).optional(),
+
+    /**
      * Ordine di fallback fra provider, separato da virgola.
-     * Valori ammessi: anthropic | openai | deepseek | google
+     * Valori ammessi: anthropic | openai | deepseek | google | openrouter
      *
      * Il router prova i provider in quest'ordine: se il primo è in errore,
      * rate-limited o non configurato, passa al successivo invece di far
@@ -133,16 +142,16 @@ export const env = createEnv({
      */
     LLM_PROVIDER_ORDER: z
       .string()
-      .default('google,deepseek,anthropic')
+      .default('openrouter,google,deepseek,anthropic')
       .refine(
         (value) =>
           value
             .split(',')
             .map((p) => p.trim())
             .every((p) =>
-              ['anthropic', 'openai', 'deepseek', 'google'].includes(p),
+              ['anthropic', 'openai', 'deepseek', 'google', 'openrouter'].includes(p),
             ),
-        'LLM_PROVIDER_ORDER accetta solo: anthropic, openai, deepseek, google.',
+        'LLM_PROVIDER_ORDER accetta solo: anthropic, openai, deepseek, google, openrouter.',
       ),
 
     // --- Stripe ---
@@ -213,6 +222,8 @@ export const env = createEnv({
     DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL,
     GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL,
     LLM_PROVIDER_ORDER: process.env.LLM_PROVIDER_ORDER,
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
@@ -246,12 +257,15 @@ const CONFIGURED_LLM_PROVIDERS = [
   env.DEEPSEEK_API_KEY && 'deepseek',
   env.ANTHROPIC_API_KEY && 'anthropic',
   env.OPENAI_API_KEY && 'openai',
-].filter(Boolean) as Array<'google' | 'deepseek' | 'anthropic' | 'openai'>;
+  env.OPENROUTER_API_KEY && 'openrouter',
+].filter(Boolean) as Array<
+  'google' | 'deepseek' | 'anthropic' | 'openai' | 'openrouter'
+>;
 
 if (CONFIGURED_LLM_PROVIDERS.length === 0) {
   throw new Error(
     'Configurazione non valida: serve almeno una chiave fra ' +
-      'GOOGLE_GENERATIVE_AI_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY e OPENAI_API_KEY.',
+      'GOOGLE_GENERATIVE_AI_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY e OPENROUTER_API_KEY.',
   );
 }
 
@@ -263,7 +277,9 @@ if (CONFIGURED_LLM_PROVIDERS.length === 0) {
 export const llmProviderOrder = env.LLM_PROVIDER_ORDER.split(',')
   .map((provider) => provider.trim())
   .filter(
-    (provider): provider is 'google' | 'deepseek' | 'anthropic' | 'openai' =>
+    (
+      provider,
+    ): provider is 'google' | 'deepseek' | 'anthropic' | 'openai' | 'openrouter' =>
       CONFIGURED_LLM_PROVIDERS.includes(provider as never),
   );
 

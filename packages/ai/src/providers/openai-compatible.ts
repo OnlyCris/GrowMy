@@ -180,3 +180,29 @@ export function createOpenAiProvider(
     pricePerMillionOutput: 0.6,
   });
 }
+
+/**
+ * OpenRouter. Un solo endpoint davanti a decine di modelli (Anthropic,
+ * OpenAI, Google, Meta, ...): stesso schema `/chat/completions` di OpenAI,
+ * il modello si sceglie con lo slug `provider/nome` nel campo `model`.
+ *
+ * Prezzi NON fissi come gli altri adapter: dipendono dal modello scelto via
+ * `OPENROUTER_MODEL`, OpenRouter li rifattura quasi 1:1 dal provider a monte.
+ * Qui teniamo il listino di gpt-4o-mini (il default) come stima migliore
+ * possibile per il conteggio costi — un modello diverso renderà quel numero
+ * indicativo, non i token effettivamente fatturati (che comunque OpenRouter
+ * non riporta nella risposta di `/chat/completions`).
+ */
+export function createOpenRouterProvider(
+  apiKey: string,
+  model = 'openai/gpt-4o-mini',
+): LlmProvider {
+  return createOpenAiCompatibleProvider({
+    name: 'openrouter',
+    apiKey,
+    baseUrl: 'https://openrouter.ai/api',
+    model,
+    pricePerMillionInput: 0.15,
+    pricePerMillionOutput: 0.6,
+  });
+}

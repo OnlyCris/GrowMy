@@ -12,6 +12,7 @@ import { createGoogleProvider } from './providers/google';
 import {
   createDeepSeekProvider,
   createOpenAiProvider,
+  createOpenRouterProvider,
 } from './providers/openai-compatible';
 
 /**
@@ -38,6 +39,7 @@ export interface RouterConfig {
   deepseek?: { apiKey: string; baseUrl?: string; model?: string };
   anthropic?: { apiKey: string; model?: string };
   openai?: { apiKey: string; model?: string };
+  openrouter?: { apiKey: string; model?: string };
   logger?: Logger;
   /** Tentativi per singolo provider prima di passare al successivo. */
   attemptsPerProvider?: number;
@@ -92,6 +94,12 @@ export function createLlmRouter(config: RouterConfig): LlmRouter {
     providers.set(
       'openai',
       createOpenAiProvider(config.openai.apiKey, config.openai.model),
+    );
+  }
+  if (config.openrouter?.apiKey) {
+    providers.set(
+      'openrouter',
+      createOpenRouterProvider(config.openrouter.apiKey, config.openrouter.model),
     );
   }
 
@@ -173,13 +181,14 @@ export function createLlmRouter(config: RouterConfig): LlmRouter {
  * È il costruttore usato dal worker: tiene la configurazione in un solo posto.
  */
 export function createLlmRouterFromEnv(logger?: Logger): LlmRouter {
-  const rawOrder = process.env.LLM_PROVIDER_ORDER ?? 'google,deepseek,anthropic';
+  const rawOrder =
+    process.env.LLM_PROVIDER_ORDER ?? 'openrouter,google,deepseek,anthropic';
 
   const order = rawOrder
     .split(',')
     .map((name) => name.trim())
     .filter((name): name is ProviderName =>
-      ['google', 'deepseek', 'anthropic', 'openai'].includes(name),
+      ['google', 'deepseek', 'anthropic', 'openai', 'openrouter'].includes(name),
     );
 
   return createLlmRouter({
@@ -199,6 +208,12 @@ export function createLlmRouterFromEnv(logger?: Logger): LlmRouter {
       : undefined,
     openai: process.env.OPENAI_API_KEY
       ? { apiKey: process.env.OPENAI_API_KEY }
+      : undefined,
+    openrouter: process.env.OPENROUTER_API_KEY
+      ? {
+          apiKey: process.env.OPENROUTER_API_KEY,
+          model: process.env.OPENROUTER_MODEL,
+        }
       : undefined,
   });
 }

@@ -11,7 +11,12 @@
  * controllo su timeout, retry e conteggio dei costi.
  */
 
-export type ProviderName = 'google' | 'deepseek' | 'anthropic' | 'openai';
+export type ProviderName =
+  | 'google'
+  | 'deepseek'
+  | 'anthropic'
+  | 'openai'
+  | 'openrouter';
 
 /** Messaggio in formato neutro, tradotto da ogni adapter nel proprio schema. */
 export interface ChatMessage {
