@@ -120,8 +120,14 @@ export const env = createEnv({
      * Quelli servono per l'OAuth di login e Search Console; questa serve a
      * generare testo. Si ottengono da due console differenti e non sono
      * intercambiabili — è la confusione più comune in fase di setup.
+     *
+     * NESSUN vincolo di prefisso: le chiavi storiche iniziano con `AIza`, ma
+     * AI Studio ne emette anche in altri formati (es. `AQ.`) che l'API accetta
+     * allo stesso modo — verificato con una chiamata reale, non solo dalla
+     * documentazione. Un `.startsWith('AIza')` qui avrebbe fatto fallire il
+     * boot per una chiave perfettamente valida.
      */
-    GOOGLE_GENERATIVE_AI_API_KEY: z.string().startsWith('AIza').optional(),
+    GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
 
     /**
      * OpenRouter. Un solo endpoint OpenAI-compatibile davanti a decine di
