@@ -364,10 +364,29 @@ trap - ERR
 # ---------------------------------------------------------------------------
 step "Pulizia"
 
-# Rimuove solo le immagini senza tag e più vecchie di 7 giorni: le immagini
-# taggate con SHA restano, perché sono ciò che rende possibile il rollback.
+# Rimuove le immagini senza tag e più vecchie di 7 giorni.
 docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true
 docker builder prune -f --filter "until=168h" >/dev/null 2>&1 || true
+
+# Le immagini taggate con SHA invece NON scadono mai da sole: ogni deploy ne
+# aggiunge di nuove per rendere il rollback una riga di comando, ma su un
+# server con 20GB di disco si accumulano in fretta (un worker pesa ~1.3GB).
+# Qui è già successo: 17 tag accumulati in un giorno hanno riempito il disco
+# a metà di un deploy, mandando in errore anche il rollback automatico che
+# doveva salvare la situazione. Si tengono le 2 più recenti per tag (quella
+# attuale e la precedente, per un rollback immediato) e si eliminano le
+# altre — un rollback più vecchio richiede comunque una ricostruzione da
+# sorgente, non solo un `docker tag`.
+for repo in growmy-web growmy-worker; do
+  docker images "$repo" --format '{{.Tag}}	{{.CreatedAt}}' \
+    | sort -k2 -r \
+    | awk 'NR>2 {print $1}' \
+    | while read -r old_tag; do
+        [[ -n "$old_tag" && "$old_tag" != "<none>" ]] || continue
+        docker rmi "${repo}:${old_tag}" >/dev/null 2>&1 || true
+      done
+done
+
 ok "Immagini obsolete rimosse"
 
 # ---------------------------------------------------------------------------
