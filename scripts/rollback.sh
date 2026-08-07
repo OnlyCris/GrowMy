@@ -149,7 +149,10 @@ SAFETY_BACKUP="${BACKUP_DIR}/pre-rollback-$(date +%Y%m%d-%H%M%S)-${CURRENT_SHORT
 
 # Anche quando si torna indietro conviene salvare lo stato presente: se il
 # rollback si rivela l'errore, senza questo dump non c'è modo di tornare avanti.
-if compose exec -T postgres pg_dump -U postgres -d growmy --clean --if-exists \
+#
+# `pg_dump` legge `PGPASSWORD`, non `POSTGRES_PASSWORD` — vedi lo stesso
+# commento in `update.sh`.
+if compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -d growmy --clean --if-exists' \
     | gzip -9 > "$SAFETY_BACKUP" 2>/dev/null; then
   ok "Stato attuale salvato: $(basename "$SAFETY_BACKUP")"
 else
@@ -191,7 +194,10 @@ if [[ -n "$RESTORE_DB" ]]; then
   compose stop web worker
 
   log "Ripristino in corso (può richiedere alcuni minuti)"
-  if gunzip -c "$RESTORE_DB" | compose exec -T postgres psql -U postgres -d growmy -v ON_ERROR_STOP=1 >/dev/null; then
+  # `psql` legge `PGPASSWORD`, non `POSTGRES_PASSWORD` — vedi lo stesso
+  # commento in `update.sh`. Lo stdin (il dump decompresso) passa comunque
+  # attraverso `sh -c` fino a `psql` senza differenze.
+  if gunzip -c "$RESTORE_DB" | compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d growmy -v ON_ERROR_STOP=1' >/dev/null; then
     ok "Database ripristinato da $(basename "$RESTORE_DB")"
   else
     die "Ripristino fallito. Il database potrebbe essere in uno stato incoerente: intervieni a mano."

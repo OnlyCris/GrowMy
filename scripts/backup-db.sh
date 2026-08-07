@@ -74,11 +74,16 @@ log "Avvio del dump verso $(basename "$TARGET")"
 # `--clean --if-exists`: ripristinabile su un database esistente.
 # `--no-owner --no-privileges`: il ripristino non richiede gli stessi ruoli,
 # utile per rimontare un backup di produzione su una macchina di staging.
-if ! compose exec -T postgres pg_dump \
+#
+# `pg_dump` legge `PGPASSWORD`, non `POSTGRES_PASSWORD` — vedi lo stesso
+# commento in `update.sh`.
+if ! compose exec -T postgres sh -c '
+      PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
       -U postgres -d growmy \
       --clean --if-exists --no-owner --no-privileges \
-      --exclude-table-data='rate_limit_violations' \
-      --exclude-table-data='job_events' \
+      --exclude-table-data="rate_limit_violations" \
+      --exclude-table-data="job_events"
+    ' \
       | gzip -9 > "$TEMP"; then
   rm -f "$TEMP"
   die "pg_dump fallito."

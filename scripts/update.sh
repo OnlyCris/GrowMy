@@ -130,7 +130,12 @@ else
 
   # `--clean --if-exists`: il dump è ripristinabile su un database esistente
   # senza doverlo prima svuotare a mano.
-  if compose exec -T postgres pg_dump -U postgres -d growmy --clean --if-exists \
+  #
+  # `pg_dump` legge `PGPASSWORD`, non `POSTGRES_PASSWORD` — libpq non conosce
+  # quel nome. Il container ha già `POSTGRES_PASSWORD` in ambiente (dal blocco
+  # `environment:` del servizio postgres); la shell dentro `exec` la rilegge e
+  # la espone col nome giusto, senza bisogno che questo script la conosca.
+  if compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -d growmy --clean --if-exists' \
       | gzip -9 > "$BACKUP_FILE"; then
     BACKUP_SIZE="$(du -h "$BACKUP_FILE" | cut -f1)"
     ok "Backup salvato: $(basename "$BACKUP_FILE") (${BACKUP_SIZE})"
