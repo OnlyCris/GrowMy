@@ -195,32 +195,57 @@ export function isRetryableError(error: unknown): boolean {
   return true;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Carica il record del job dal database.
  * Il worker riceve da BullMQ solo l'id: tutto il resto (scope, payload,
  * tentativi) sta in Postgres, che è la fonte di verità.
+ *
+ * RITENTA brevemente se non trova nulla, invece di arrendersi al primo giro.
+ *
+ * Le Server Action web accodano dentro `withUserContext`: la riga Postgres e
+ * la push su Redis avvengono nella STESSA transazione, che committa solo
+ * quando l'intera action ritorna — ma Redis consegna il job al worker subito,
+ * prima del commit. Se il worker è più veloce del commit (capita, non è raro
+ * su un job semplice), questa select non vedeva ancora la riga: tornava
+ * `null`, `handleJob` usciva pulito senza toccare nulla, e BullMQ segnava il
+ * job "completato" — nessun errore, quindi nessun retry automatico, e la riga
+ * Postgres restava `pending` per sempre. Scoperto in produzione su articoli
+ * bloccati "in lavorazione" che non venivano mai ripresi.
+ *
+ * Il worker che accoda per sé stesso (`apps/worker/src/index.ts`, fuori da
+ * qualunque transazione con commit differito) non ha questa corsa: la
+ * retry qui è innocua e quasi sempre a costo zero in quel caso, si attiva
+ * solo quando serve davvero.
  */
 export async function loadJobRecord(jobId: string) {
   const db = getWorkerDb();
+  const delaysMs = [50, 100, 200, 400, 800];
 
-  const [record] = await db
-    .select({
-      id: jobs.id,
-      organizationId: jobs.organizationId,
-      productId: jobs.productId,
-      type: jobs.type,
-      status: jobs.status,
-      targetId: jobs.targetId,
-      payload: jobs.payload,
-      attempts: jobs.attempts,
-      maxAttempts: jobs.maxAttempts,
-      traceId: jobs.traceId,
-    })
-    .from(jobs)
-    .where(eq(jobs.id, jobId))
-    .limit(1);
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    const [record] = await db
+      .select({
+        id: jobs.id,
+        organizationId: jobs.organizationId,
+        productId: jobs.productId,
+        type: jobs.type,
+        status: jobs.status,
+        targetId: jobs.targetId,
+        payload: jobs.payload,
+        attempts: jobs.attempts,
+        maxAttempts: jobs.maxAttempts,
+        traceId: jobs.traceId,
+      })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
 
-  return record ?? null;
+    if (record) return record;
+    if (attempt < delaysMs.length) await sleep(delaysMs[attempt]);
+  }
+
+  return null;
 }
 
 /**
