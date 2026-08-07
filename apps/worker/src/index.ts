@@ -4,6 +4,7 @@ import { createLogger, withContext } from '@growmy/logger';
 import { Worker, type Job } from 'bullmq';
 import { eq, sql } from 'drizzle-orm';
 
+import { markArticleFailed } from './lib/article-failure';
 import { releaseReservation, reservationIdFromPayload } from './lib/credits';
 import {
   isRetryableError,
@@ -283,6 +284,18 @@ async function handleJob(bullJob: Job): Promise<void> {
           { reservationId },
           'credito restituito dopo fallimento definitivo',
         );
+      }
+
+      // Vedi il commento in `lib/article-failure.ts`: senza questo,
+      // l'articolo resta fermo nel suo stato precedente (es. "generating")
+      // con nessuna causa visibile in UI.
+      if (
+        record.targetId &&
+        (record.type === 'article_research' ||
+          record.type === 'article_generate' ||
+          record.type === 'article_publish')
+      ) {
+        await markArticleFailed(record.targetId, toUserMessage(error));
       }
     }
 

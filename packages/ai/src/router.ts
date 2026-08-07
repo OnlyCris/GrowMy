@@ -52,6 +52,44 @@ export interface LlmRouter {
   readonly availableProviders: ProviderName[];
 }
 
+interface ProviderFailure {
+  provider: ProviderName;
+  message: string;
+  statusCode?: number;
+  retryable: boolean;
+}
+
+/**
+ * Tutti i provider configurati hanno fallito.
+ *
+ * Prima di questo tipo, l'esaurimento della catena lanciava un `Error` nudo:
+ * `toUserMessage` (worker/lib/job-recorder.ts) non lo riconosce, quindi il
+ * dettaglio per-provider — compreso "era un 429, tutti quanti" — spariva
+ * dietro il messaggio generico "si è verificato un errore imprevisto".
+ * Scoperto in produzione su 4 articoli bloccati in `generating` senza alcuna
+ * causa visibile, con `job_events` che mostrava solo il messaggio generico.
+ *
+ * `rateLimited` è vero solo se OGNI fallimento era un 429: un solo provider
+ * rate-limited fra tre non è "il sistema è a corto di quota", è solo quel
+ * provider — il router sarebbe comunque passato agli altri prima di arrivare
+ * qui.
+ */
+export class AllProvidersFailedError extends Error {
+  override readonly name = 'AllProvidersFailedError';
+  readonly retryable: boolean;
+  readonly rateLimited: boolean;
+
+  constructor(public readonly failures: ProviderFailure[]) {
+    super(
+      `Tutti i provider hanno fallito.\n${failures
+        .map((f) => `  - ${f.provider}: ${f.message}`)
+        .join('\n')}`,
+    );
+    this.retryable = failures.some((f) => f.retryable);
+    this.rateLimited = failures.length > 0 && failures.every((f) => f.statusCode === 429);
+  }
+}
+
 /** Backoff esponenziale con jitter, per non sincronizzare i retry concorrenti. */
 function backoffDelayMs(attempt: number): number {
   const base = Math.min(1_000 * 2 ** attempt, 15_000);
@@ -121,10 +159,14 @@ export function createLlmRouter(config: RouterConfig): LlmRouter {
     availableProviders: chain,
 
     async complete(request: CompletionRequest): Promise<CompletionResult> {
-      const failures: string[] = [];
+      const failures: ProviderFailure[] = [];
 
       for (const name of chain) {
         const provider = providers.get(name)!;
+        // Solo l'ultimo fallimento di QUESTO provider entra nel riepilogo:
+        // è quello che determina se si passa al prossimo, i tentativi
+        // intermedi sono rumore per chi legge l'errore finale.
+        let lastFailure: ProviderFailure | null = null;
 
         for (let attempt = 0; attempt < attemptsPerProvider; attempt++) {
           try {
@@ -147,13 +189,14 @@ export function createLlmRouter(config: RouterConfig): LlmRouter {
           } catch (error) {
             const isProviderError = error instanceof ProviderError;
             const retryable = isProviderError ? error.retryable : true;
+            const statusCode = isProviderError ? error.statusCode : undefined;
             const message =
               error instanceof Error ? error.message : String(error);
 
-            failures.push(`${name}: ${message}`);
+            lastFailure = { provider: name, message, statusCode, retryable };
 
             log?.warn(
-              { provider: name, attempt, retryable, err: message },
+              { provider: name, attempt, retryable, statusCode, err: message },
               'tentativo fallito',
             );
 
@@ -168,11 +211,11 @@ export function createLlmRouter(config: RouterConfig): LlmRouter {
             await sleep(backoffDelayMs(attempt));
           }
         }
+
+        if (lastFailure) failures.push(lastFailure);
       }
 
-      throw new Error(
-        `Tutti i provider hanno fallito.\n${failures.map((f) => `  - ${f}`).join('\n')}`,
-      );
+      throw new AllProvidersFailedError(failures);
     },
   };
 }

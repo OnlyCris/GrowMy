@@ -1,11 +1,13 @@
 import 'server-only';
 
-import { computeQualityScore, countWords, normalizeSlug } from '@growmy/core';
+import { canTransition, computeQualityScore, countWords, normalizeSlug, type ArticleStatus } from '@growmy/core';
 import { articleVersions, articles, db } from '@growmy/db';
-import { createManualArticleSchema, deleteArticleSchema } from '@growmy/validation';
+import { createManualArticleSchema, deleteArticleSchema, retryArticleSchema } from '@growmy/validation';
 import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
+import { enqueueJob, mapDatabaseError } from '@/lib/jobs';
+import { getLatestPipelineJob } from '@/lib/queries/articles';
 import { getArticleOrganizationId } from '@/lib/queries/review';
 import { getProductOrganizationId } from '@/lib/queries/products';
 
@@ -135,5 +137,93 @@ export const deleteArticle = createSafeAction(
     revalidatePath(`/${membership.organizationSlug}/review`);
 
     return { id: input.articleId };
+  },
+);
+
+/**
+ * Ritenta la ricerca o la stesura di un articolo finito in `failed` — lo
+ * stesso stage che è fallito, non necessariamente da zero: la ricerca
+ * riparte se era quella a fallire, la stesura se il brief esisteva già.
+ *
+ * `reserveCredit: false`: si tratta di recuperare un tentativo già pagato
+ * (o mai davvero addebitato, il primo tentativo è gratuito per design — vedi
+ * `lib/jobs.ts`), non di venderne uno nuovo.
+ *
+ * I fallimenti in pubblicazione restano fuori da questo pulsante: rigenerare
+ * i contenuti butterebbe via una bozza già buona per un problema che quasi
+ * sempre sta nell'integrazione di destinazione, non nel testo — quella si
+ * ripara dalla pagina Integrazione, non riscrivendo l'articolo.
+ */
+export const retryArticle = createSafeAction(
+  {
+    name: 'articles.retry',
+    schema: retryArticleSchema,
+    rateLimit: 'articles.manage',
+    minimumRole: 'editor',
+    resolveTenant: (input) => getArticleOrganizationId(input.articleId),
+  },
+  async ({ input, membership, traceId }) => {
+    const [row] = await db
+      .select({ status: articles.status, productId: articles.productId })
+      .from(articles)
+      .where(
+        and(
+          eq(articles.id, input.articleId),
+          eq(articles.organizationId, membership.organizationId),
+          isNull(articles.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!row) throw new ActionError('NOT_FOUND', 'Articolo non trovato.');
+    if (row.status !== 'failed') {
+      throw new ActionError('CONFLICT', 'Questo articolo non è in stato di errore.');
+    }
+
+    const lastJob = await getLatestPipelineJob(input.articleId, membership.organizationId);
+
+    if (lastJob?.type === 'article_publish') {
+      throw new ActionError(
+        'CONFLICT',
+        'Il fallimento è in pubblicazione, non in stesura: controlla l’integrazione collegata.',
+      );
+    }
+
+    const retryType = lastJob?.type === 'article_research' ? 'article_research' : 'article_generate';
+    const nextStatus = retryType === 'article_research' ? 'researching' : 'generating';
+
+    if (!canTransition(row.status as ArticleStatus, nextStatus)) {
+      throw new ActionError('CONFLICT', 'Impossibile ritentare questo articolo ora.');
+    }
+
+    await db
+      .update(articles)
+      .set({ status: nextStatus, failureReason: null, updatedAt: new Date() })
+      .where(eq(articles.id, input.articleId));
+
+    try {
+      await enqueueJob({
+        userId: membership.userId,
+        organizationId: membership.organizationId,
+        productId: row.productId,
+        type: retryType,
+        targetType: 'article',
+        targetId: input.articleId,
+        payload: {},
+        discriminator: `retry-${Date.now()}`,
+        reserveCredit: false,
+        traceId,
+      });
+    } catch (error) {
+      mapDatabaseError(error);
+    }
+
+    revalidatePath(`/${membership.organizationSlug}/products/${row.productId}/articles`);
+    revalidatePath(
+      `/${membership.organizationSlug}/products/${row.productId}/articles/${input.articleId}`,
+    );
+    revalidatePath(`/${membership.organizationSlug}/review`);
+
+    return { articleId: input.articleId };
   },
 );

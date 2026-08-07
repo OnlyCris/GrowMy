@@ -5,14 +5,17 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { QualityScorePanel } from '@/app/(app)/[orgSlug]/review/_components/quality-score-panel';
+import { AutoRefresh } from '@/components/shared/auto-refresh';
 import { StatusBadge, type ArticleStatus } from '@/components/shared/status-badge';
+import { Countdown } from '@/components/shared/countdown';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireOrgMembership } from '@/lib/auth/guards';
-import { getArticleDetail } from '@/lib/queries/articles';
+import { getArticleDetail, getLatestPipelineJob } from '@/lib/queries/articles';
 import { formatRelativeTime } from '@/lib/utils';
 import type { QualityScore } from '@/types/review';
 
 import { DeleteArticleButton } from './_components/delete-article-button';
+import { RetryArticleButton } from './_components/retry-article-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +40,15 @@ export default async function ArticleDetailPage({
     getArticleDetail(articleId, membership.organizationId),
   );
   if (!article) notFound();
+
+  const lastJob = await withUserContext(membership.userId, () =>
+    getLatestPipelineJob(articleId, membership.organizationId),
+  );
+  const pendingRetryAt =
+    lastJob?.status === 'pending' && lastJob.nextRetryAt && lastJob.nextRetryAt > new Date()
+      ? lastJob.nextRetryAt
+      : null;
+  const isRateLimited = lastJob?.lastErrorCode === 'RATE_LIMITED';
 
   const title = article.versionTitle ?? article.title ?? article.keywordTerm ?? 'Senza titolo';
   const metaDescription = article.versionMetaDescription ?? article.metaDescription;
@@ -86,9 +98,37 @@ export default async function ArticleDetailPage({
         ) : null}
 
         {article.status === 'failed' && article.failureReason ? (
-          <p className="rounded-[var(--radius-md)] bg-danger-100 px-3 py-2 text-sm text-danger-700">
-            {article.failureReason}
-          </p>
+          <div className="flex flex-col gap-2 rounded-[var(--radius-md)] bg-danger-100 px-3 py-2.5">
+            {isRateLimited ? (
+              <span className="w-fit rounded-full bg-danger-200 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-danger-700">
+                Limite di richieste
+              </span>
+            ) : null}
+            <p className="text-sm text-danger-700">{article.failureReason}</p>
+            {lastJob && lastJob.type !== 'article_publish' ? (
+              <div className="mt-1">
+                <RetryArticleButton articleId={article.id} />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {pendingRetryAt ? (
+          <div className="flex flex-col gap-1 rounded-[var(--radius-md)] bg-accent-50 px-3 py-2.5">
+            <AutoRefresh enabled intervalMs={5000} maxPolls={60} />
+            {isRateLimited ? (
+              <span className="w-fit rounded-full bg-accent-100 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-accent-900">
+                Limite di richieste
+              </span>
+            ) : null}
+            <p className="text-sm text-accent-900">
+              {lastJob?.lastError ?? 'Ultimo tentativo non riuscito.'}
+            </p>
+            <p className="text-xs text-foreground-muted">
+              Nuovo tentativo automatico tra <Countdown to={pendingRetryAt} /> (tentativo{' '}
+              {lastJob?.attempts} di {lastJob?.maxAttempts}).
+            </p>
+          </div>
         ) : null}
 
         {article.publishedUrl ? (

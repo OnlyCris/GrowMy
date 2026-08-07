@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { articleVersions, articles, db, keywords } from '@growmy/db';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { articleVersions, articles, db, jobs, keywords } from '@growmy/db';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 /**
  * QUERY DEGLI ARTICOLI PER LA VISTA "TUTTI GLI ARTICOLI" DI UN PRODOTTO.
@@ -61,6 +61,40 @@ export async function getArticleDetail(articleId: string, organizationId: string
         isNull(articles.deletedAt),
       ),
     )
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * L'ultimo job di pipeline (ricerca, stesura, pubblicazione) su questo
+ * articolo — usato per mostrare PERCHÉ un articolo è fermo, non solo CHE è
+ * fermo. `jobs.last_error` è già il testo tradotto per l'utente (mai lo
+ * stack trace, vedi `job-recorder.ts` nel worker); `next_retry_at`, quando
+ * presente, è il momento reale in cui il worker riproverà da solo — non una
+ * stima, è il valore che BullMQ userà davvero.
+ */
+export async function getLatestPipelineJob(articleId: string, organizationId: string) {
+  const [row] = await db
+    .select({
+      type: jobs.type,
+      status: jobs.status,
+      lastError: jobs.lastError,
+      lastErrorCode: jobs.lastErrorCode,
+      nextRetryAt: jobs.nextRetryAt,
+      attempts: jobs.attempts,
+      maxAttempts: jobs.maxAttempts,
+      updatedAt: jobs.updatedAt,
+    })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.targetId, articleId),
+        eq(jobs.organizationId, organizationId),
+        inArray(jobs.type, ['article_research', 'article_generate', 'article_publish']),
+      ),
+    )
+    .orderBy(desc(jobs.updatedAt))
     .limit(1);
 
   return row ?? null;

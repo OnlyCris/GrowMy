@@ -39,5 +39,12 @@ export const deleteArticleSchema = z
   })
   .strict();
 
+export const retryArticleSchema = z
+  .object({
+    articleId: uuid,
+  })
+  .strict();
+
 export type CreateManualArticleInput = z.infer<typeof createManualArticleSchema>;
 export type DeleteArticleInput = z.infer<typeof deleteArticleSchema>;
+export type RetryArticleInput = z.infer<typeof retryArticleSchema>;

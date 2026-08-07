@@ -170,6 +170,22 @@ export function toUserMessage(error: unknown): string {
     if (candidate.name === 'CryptoError') {
       return 'Impossibile decifrare le credenziali dell’integrazione. Riconnettila dalle impostazioni.';
     }
+    // Ogni provider LLM configurato ha rifiutato la richiesta. Distinto dal
+    // caso generico perché è l'unico per cui ha senso mostrare un'attesa
+    // concreta invece di un errore muto — vedi `nextRetryAt` in `markFailed`.
+    if (candidate.name === 'AllProvidersFailedError') {
+      const c = candidate as { rateLimited?: unknown; failures?: unknown };
+      if (c.rateLimited) {
+        return 'Limite di richieste raggiunto su tutti i provider AI configurati. Nuovo tentativo automatico appena la quota si libera.';
+      }
+      const failures = Array.isArray(c.failures)
+        ? (c.failures as Array<{ provider?: unknown; message?: unknown }>)
+        : [];
+      const summary = failures
+        .map((f) => (typeof f.provider === 'string' ? f.provider : '?'))
+        .join(', ');
+      return `Nessun provider AI ha risposto correttamente (${summary || 'nessuno configurato'}).`;
+    }
   }
 
   return 'Si è verificato un errore imprevisto durante l’elaborazione.';
@@ -178,8 +194,11 @@ export function toUserMessage(error: unknown): string {
 /** Codice macchina dell'errore, se disponibile: alimenta i filtri in UI. */
 export function toErrorCode(error: unknown): string | undefined {
   if (error && typeof error === 'object') {
-    const candidate = error as { code?: unknown };
+    const candidate = error as { code?: unknown; name?: unknown; rateLimited?: unknown };
     if (typeof candidate.code === 'string') return candidate.code;
+    if (candidate.name === 'AllProvidersFailedError') {
+      return candidate.rateLimited ? 'RATE_LIMITED' : 'ALL_PROVIDERS_FAILED';
+    }
   }
   return undefined;
 }

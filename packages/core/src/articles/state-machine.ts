@@ -33,7 +33,8 @@ export type ArticleStatus =
  *  - `published` non torna indietro. Un contenuto già live si aggiorna con un
  *    nuovo articolo di refresh, non mutando quello vecchio: altrimenti si perde
  *    la corrispondenza con l'URL indicizzato.
- *  - Da `failed` si può solo ritentare la pubblicazione o archiviare.
+ *  - Da `failed` si ritenta lo stage che era fallito (ricerca, stesura o
+ *    pubblicazione) o si archivia.
  */
 const TRANSITIONS: Readonly<Record<ArticleStatus, readonly ArticleStatus[]>> = {
   queued: ['researching', 'archived', 'failed'],
@@ -44,7 +45,7 @@ const TRANSITIONS: Readonly<Record<ArticleStatus, readonly ArticleStatus[]>> = {
   approved: ['publishing', 'draft_ready', 'archived'],
   publishing: ['published', 'failed'],
   published: ['archived'],
-  failed: ['publishing', 'generating', 'archived'],
+  failed: ['publishing', 'generating', 'researching', 'archived'],
   archived: [],
 } as const;
 
