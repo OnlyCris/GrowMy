@@ -1,0 +1,63 @@
+# ============================================================================
+# GrowMy — blocco Caddy per growmy.menuisland.it (dashboard)
+#
+# Stesso schema di blog.menuisland.it.caddy: TLS via certbot (webroot), non
+# l'ACME automatico di Caddy — il blocco http:// sotto serve sia la prima
+# emissione sia i rinnovi futuri, con Caddy che tiene occupata la porta 80.
+#
+# Questo dominio serve la DASHBOARD (login, revisione, impostazioni — tutto
+# ciò che sta dietro autenticazione), non la vetrina blog pubblica: quella è
+# blog.menuisland.it, stessa app Next.js, instradamento diverso deciso dal
+# middleware in base all'header Host.
+# ============================================================================
+
+# --- Sfida ACME (rinnovo certbot via webroot) -------------------------------
+http://growmy.menuisland.it {
+	handle /.well-known/acme-challenge/* {
+		root * /var/www/certbot
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+# --- Sito HTTPS -------------------------------------------------------------
+growmy.menuisland.it {
+	tls /etc/letsencrypt/live/growmy.menuisland.it/fullchain.pem /etc/letsencrypt/live/growmy.menuisland.it/privkey.pem
+
+	encode zstd gzip
+
+	header -Server
+
+	# Il webhook di Stripe verifica una firma HMAC sul corpo RAW.
+	handle /api/webhooks/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Gli endpoint di health non devono essere raggiungibili da internet: la
+	# Caddy li tiene per sé (li usa lo script di deploy via localhost).
+	handle /api/health {
+		respond 404
+	}
+	handle /api/ready {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/growmy.menuisland.it.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
