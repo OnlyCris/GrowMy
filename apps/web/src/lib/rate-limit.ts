@@ -84,6 +84,7 @@ export const RATE_LIMITS = {
   'review.rewrite': { limit: 30, windowMs: 60_000 },
   'keywords.generate': { limit: 5, windowMs: 3_600_000 },
   'articles.generate': { limit: 10, windowMs: 3_600_000 },
+  'articles.manage': { limit: 30, windowMs: 3_600_000 },
   'integration.connect': { limit: 10, windowMs: 3_600_000 },
   'planner.run': { limit: 2, windowMs: 3_600_000 },
   'api.default': { limit: 120, windowMs: 60_000 },

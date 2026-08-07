@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { getProductByBlogDomain, getPublishedArticlesForBlog } from '@/lib/queries/blog';
+
+import { BlogArticleList } from './_components/blog-article-list';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,12 +21,6 @@ export async function generateMetadata({
     alternates: { canonical: `https://${hostname}/` },
   };
 }
-
-const dateFormatter = new Intl.DateTimeFormat('it-IT', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-});
 
 export default async function BlogIndexPage({
   params,
@@ -49,28 +44,7 @@ export default async function BlogIndexPage({
           Non ci sono ancora articoli pubblicati.
         </p>
       ) : (
-        <ul className="mt-8 flex flex-col divide-y divide-border">
-          {articles.map((article) => (
-            <li key={article.id} className="py-6 first:pt-0">
-              <Link
-                href={`/${article.slug}`}
-                className="text-lg font-semibold text-foreground hover:underline"
-              >
-                {article.title}
-              </Link>
-              {article.excerpt ? (
-                <p className="mt-2 text-sm leading-relaxed text-foreground-muted">
-                  {article.excerpt}
-                </p>
-              ) : null}
-              {article.publishedAt ? (
-                <p className="mt-2 text-xs text-foreground-subtle">
-                  {dateFormatter.format(new Date(article.publishedAt))}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <BlogArticleList articles={articles} />
       )}
     </div>
   );

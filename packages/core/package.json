@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./articles/state-machine": "./src/articles/state-machine.ts"
+    "./articles/state-machine": "./src/articles/state-machine.ts",
+    "./articles/quality-score": "./src/articles/quality-score.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

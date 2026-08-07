@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { StatusBadge } from '@/components/shared/status-badge';
+import { Button } from '@/components/ui/button';
 import { requireOrgMembership } from '@/lib/auth/guards';
 import { getArticlesForProduct } from '@/lib/queries/articles';
 import { formatRelativeTime } from '@/lib/utils';
@@ -29,23 +30,34 @@ export default async function ProductArticlesPage({
     getArticlesForProduct(productId),
   );
 
+  const writeManuallyLink = (
+    <Button type="button" size="sm" variant="outline" asChild>
+      <Link href={`/${orgSlug}/products/${productId}/articles/new`}>Scrivi manualmente</Link>
+    </Button>
+  );
+
   if (items.length === 0) {
     return (
-      <p className="text-sm text-foreground-muted">
-        Nessun articolo ancora. Vai su{' '}
-        <Link
-          href={`/${orgSlug}/products/${productId}/keywords`}
-          className="text-info-700 underline underline-offset-4 hover:no-underline"
-        >
-          Keyword
-        </Link>{' '}
-        e genera il primo.
-      </p>
+      <div className="flex flex-col gap-4">
+        <div className="flex justify-end">{writeManuallyLink}</div>
+        <p className="text-sm text-foreground-muted">
+          Nessun articolo ancora. Vai su{' '}
+          <Link
+            href={`/${orgSlug}/products/${productId}/keywords`}
+            className="text-info-700 underline underline-offset-4 hover:no-underline"
+          >
+            Keyword
+          </Link>{' '}
+          e genera il primo, oppure scrivine uno tu.
+        </p>
+      </div>
     );
   }
 
   return (
-    <ul className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">{writeManuallyLink}</div>
+      <ul className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
       {items.map((article) => (
         <li key={article.id}>
           <Link
@@ -65,6 +77,7 @@ export default async function ProductArticlesPage({
           </Link>
         </li>
       ))}
-    </ul>
+      </ul>
+    </div>
   );
 }

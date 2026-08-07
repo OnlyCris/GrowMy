@@ -14,6 +14,7 @@
     "clean": "rm -rf .turbo node_modules"
   },
   "dependencies": {
+    "@growmy/core": "workspace:*",
     "@growmy/logger": "workspace:*",
     "zod": "^3.23.8"
   },

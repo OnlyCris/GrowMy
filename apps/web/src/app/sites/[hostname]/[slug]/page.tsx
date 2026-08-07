@@ -3,7 +3,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { getProductByBlogDomain, getPublishedArticleBySlug } from '@/lib/queries/blog';
+import {
+  getArticleClusterName,
+  getProductByBlogDomain,
+  getPublishedArticleBySlug,
+  getRelatedArticles,
+} from '@/lib/queries/blog';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,13 +64,29 @@ export default async function BlogArticlePage({
   const article = await getPublishedArticleBySlug(product.id, slug);
   if (!article) notFound();
 
+  const [related, clusterName] = await Promise.all([
+    getRelatedArticles(product.id, article.id, article.keywordId),
+    getArticleClusterName(article.keywordId),
+  ]);
+
   const contentHtml = markdownToHtml(article.contentMarkdown);
+  // ~200 parole al minuto: stima standard, comunica in due secondi "quanto
+  // costa" leggere l'articolo — un segnale di navigazione, non decorazione.
+  const readingMinutes = article.wordCount ? Math.max(1, Math.round(article.wordCount / 200)) : null;
 
   return (
     <article className="mx-auto w-full max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
-      <Link href="/" className="text-sm text-foreground-muted hover:underline">
-        ← Blog
-      </Link>
+      <nav aria-label="Percorso" className="flex items-center gap-1.5 text-sm text-foreground-muted">
+        <Link href="/" className="hover:text-foreground hover:underline">
+          Blog
+        </Link>
+        {clusterName ? (
+          <>
+            <span aria-hidden="true">/</span>
+            <span>{clusterName}</span>
+          </>
+        ) : null}
+      </nav>
 
       <h1 className="mt-4 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
         {article.title}
@@ -74,7 +95,7 @@ export default async function BlogArticlePage({
       {article.publishedAt ? (
         <p className="mt-3 text-sm text-foreground-subtle">
           {dateFormatter.format(new Date(article.publishedAt))}
-          {article.wordCount ? ` · ${article.wordCount} parole` : ''}
+          {readingMinutes ? ` · ${readingMinutes} min di lettura` : ''}
         </p>
       ) : null}
 
@@ -86,6 +107,29 @@ export default async function BlogArticlePage({
         className="prose-article mt-8"
         dangerouslySetInnerHTML={{ __html: contentHtml }}
       />
+
+      {related.length > 0 ? (
+        <nav aria-label="Articoli correlati" className="mt-16 border-t border-border pt-8">
+          <h2 className="text-sm font-semibold text-foreground">Continua a leggere</h2>
+          <ul className="mt-4 grid gap-4 sm:grid-cols-2">
+            {related.map((item) => (
+              <li key={item.id}>
+                <Link
+                  href={`/${item.slug}`}
+                  className="block rounded-[var(--radius-lg)] border border-border p-4 hover:border-border-strong hover:bg-surface-muted"
+                >
+                  <p className="text-sm font-medium text-foreground">{item.title}</p>
+                  {item.excerpt ? (
+                    <p className="mt-1.5 line-clamp-2 text-xs text-foreground-muted">
+                      {item.excerpt}
+                    </p>
+                  ) : null}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ) : null}
     </article>
   );
 }

@@ -1,5 +1,3 @@
-import { countWords } from '@growmy/ai';
-
 /**
  * CALCOLO DEL QUALITY SCORE — UPGRADE #1
  *
@@ -10,6 +8,10 @@ import { countWords } from '@growmy/ai';
  * Il punteggio non decide se pubblicare — decide DOVE far guardare l'umano.
  * Una metrica sotto soglia è l'unica barra ambra del pannello, e quella è
  * l'informazione utile: dove intervenire senza rileggere 1.600 parole.
+ *
+ * In `packages/core` (non nel worker, dove viveva prima) perché serve anche
+ * al web per gli articoli scritti a mano: il punteggio si applica allo STESSO
+ * modo a testo umano e generato, la qualità non fa sconti a chi l'ha scritto.
  */
 
 /**
@@ -251,4 +253,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export { countWords };
+/** Conta le parole ignorando la sintassi Markdown. */
+export function countWords(markdown: string): number {
+  const plain = markdown
+    .replace(/```[\s\S]*?```/g, ' ') // blocchi di codice
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // immagini
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // link -> solo il testo
+    .replace(/[#*_>`~|-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return plain ? plain.split(' ').length : 0;
+}

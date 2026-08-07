@@ -4,11 +4,15 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { QualityScorePanel } from '@/app/(app)/[orgSlug]/review/_components/quality-score-panel';
 import { StatusBadge, type ArticleStatus } from '@/components/shared/status-badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireOrgMembership } from '@/lib/auth/guards';
 import { getArticleDetail } from '@/lib/queries/articles';
 import { formatRelativeTime } from '@/lib/utils';
+import type { QualityScore } from '@/types/review';
+
+import { DeleteArticleButton } from './_components/delete-article-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +55,13 @@ export default async function ArticleDetailPage({
         </Link>
         <div className="flex items-start justify-between gap-3">
           <CardTitle>{title}</CardTitle>
-          <StatusBadge status={article.status} />
+          <div className="flex items-center gap-2">
+            <StatusBadge status={article.status} />
+            <DeleteArticleButton
+              articleId={article.id}
+              redirectTo={`/${orgSlug}/products/${productId}/articles`}
+            />
+          </div>
         </div>
         <p className="text-xs text-foreground-muted">
           {article.wordCount ? `${article.wordCount} parole · ` : ''}
@@ -59,6 +69,9 @@ export default async function ArticleDetailPage({
         </p>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {article.qualityScore ? (
+          <QualityScorePanel score={article.qualityScore as unknown as QualityScore} />
+        ) : null}
         {HUMAN_GATE_STATUSES.includes(article.status) ? (
           <p className="rounded-[var(--radius-md)] bg-info-100 px-3 py-2 text-sm text-info-700">
             In attesa della tua decisione —{' '}

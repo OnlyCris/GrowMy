@@ -228,6 +228,23 @@ export async function processArticleResearch(
     throw new Error('Il brief generato non contiene sezioni utilizzabili.');
   }
 
+  // Filtra internalLinkTargets sui SOLI candidati realmente offerti: nulla
+  // vieta al modello di restituire un articleId/slug mai proposto, e quel
+  // valore finirebbe fidato ciecamente dalla stesura più avanti — è la stessa
+  // disciplina applicata al markdown finale in article-generate.processor.ts,
+  // qui applicata alla fonte prima che l'errore possa propagarsi.
+  const offeredArticleIds = new Set([
+    ...linkCandidates.map((c) => c.articleId),
+    ...(pillarArticle ? [pillarArticle.articleId] : []),
+  ]);
+  if (Array.isArray(brief.internalLinkTargets)) {
+    brief.internalLinkTargets = (
+      brief.internalLinkTargets as Array<Record<string, unknown>>
+    ).filter(
+      (t) => typeof t.articleId === 'string' && offeredArticleIds.has(t.articleId),
+    );
+  }
+
   // --- Transizione di stato ------------------------------------------------
   // Qui si decide se fermarsi per la revisione umana o proseguire: è il punto
   // in cui l'UPGRADE #1 diventa opzionale invece che obbligatorio.

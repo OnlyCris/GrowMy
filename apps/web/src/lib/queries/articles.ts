@@ -42,6 +42,7 @@ export async function getArticleDetail(articleId: string, organizationId: string
       title: articles.title,
       metaDescription: articles.metaDescription,
       wordCount: articles.wordCount,
+      qualityScore: articles.qualityScore,
       failureReason: articles.failureReason,
       publishedUrl: articles.publishedUrl,
       keywordTerm: keywords.term,

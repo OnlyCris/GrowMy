@@ -1,3 +1,5 @@
+import { countWords } from '@growmy/core';
+
 /**
  * GUARDRAIL SULL'OUTPUT DEL MODELLO
  *
@@ -8,6 +10,8 @@
  * Non sostituisce la revisione umana (UPGRADE #1): la precede, e serve a non
  * far arrivare a un umano roba palesemente rotta.
  */
+
+export { countWords };
 
 export interface GuardrailViolation {
   code:
@@ -151,18 +155,6 @@ export function hasBlockingViolation(
   return violations.some((v) => v.severity === 'error');
 }
 
-/** Conta le parole ignorando la sintassi Markdown. */
-export function countWords(markdown: string): number {
-  const plain = markdown
-    .replace(/```[\s\S]*?```/g, ' ') // blocchi di codice
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // immagini
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // link -> solo il testo
-    .replace(/[#*_>`~|-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return plain ? plain.split(' ').length : 0;
-}
 
 /** Titoli di sezione seguiti da meno di 20 parole di contenuto. */
 function findEmptySections(markdown: string): string[] {

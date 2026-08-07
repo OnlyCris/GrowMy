@@ -8,7 +8,12 @@ import {
   type BrandContext,
   type DraftResult,
 } from '@growmy/ai';
-import { stateAfterGeneration } from '@growmy/core';
+import {
+  computeQualityScore,
+  normalizeSlug,
+  sanitizeInternalLinks,
+  stateAfterGeneration,
+} from '@growmy/core';
 import {
   articleVersions,
   articles,
@@ -20,7 +25,6 @@ import {
 import { desc, eq } from 'drizzle-orm';
 
 import { recordUsage } from '../lib/credits';
-import { computeQualityScore } from '../lib/quality-score';
 import type { ProcessorContext } from './types';
 
 /**
@@ -310,6 +314,21 @@ export async function processArticleGenerate(
     throw new Error('La stesura non ha prodotto un articolo utilizzabile.');
   }
 
+  // Rimuove i link interni che puntano a slug inesistenti — il modello
+  // riceve gli slug REALI nel brief (internalLinkTargets) ma nulla gli
+  // impedisce di scriverne uno diverso nel testo finito. Scoperto in
+  // produzione: articoli che citavano "altri articoli" mai esistiti. Il
+  // testo del link resta, solo l'hyperlink rotto viene tolto.
+  const validSlugs = new Set(
+    (Array.isArray((row.brief as Record<string, unknown>)?.internalLinkTargets)
+      ? ((row.brief as Record<string, unknown>).internalLinkTargets as Array<Record<string, unknown>>)
+      : []
+    )
+      .map((t) => (typeof t.slug === 'string' ? t.slug : null))
+      .filter((s): s is string => Boolean(s)),
+  );
+  draft.contentMarkdown = sanitizeInternalLinks(draft.contentMarkdown, validSlugs);
+
   // Derivato dalla KEYWORD, non dallo slug libero del modello: lo slug
   // dell'LLM era spesso poco leggibile (troppo generico, parole d'ordine
   // fuori posto, a volte lontano dall'argomento reale). La keyword è già
@@ -410,17 +429,3 @@ function countBriefSections(brief: unknown): number {
   return 0;
 }
 
-/**
- * Normalizza uno slug.
- * `NFD` + rimozione dei diacritici trasforma "però" in "pero" invece di
- * scartare la lettera: essenziale per l'italiano.
- */
-function normalizeSlug(input: string): string {
-  return input
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-}
