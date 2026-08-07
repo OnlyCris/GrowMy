@@ -40,6 +40,7 @@ COPY packages/validation/package.json      packages/validation/
 COPY packages/env/package.json             packages/env/
 COPY packages/logger/package.json          packages/logger/
 COPY packages/config/package.json          packages/config/
+COPY packages/jobs/package.json            packages/jobs/
 
 # `--frozen-lockfile`: se il lockfile non corrisponde ai manifest il build
 # fallisce, invece di risolvere versioni diverse da quelle testate.

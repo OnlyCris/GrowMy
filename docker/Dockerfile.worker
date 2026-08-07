@@ -29,6 +29,7 @@ COPY packages/validation/package.json      packages/validation/
 COPY packages/env/package.json             packages/env/
 COPY packages/logger/package.json          packages/logger/
 COPY packages/config/package.json          packages/config/
+COPY packages/jobs/package.json            packages/jobs/
 
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
