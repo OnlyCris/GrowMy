@@ -134,12 +134,23 @@ REVOKE EXECUTE ON FUNCTION app_enqueue_job(
 -- In produzione i ruoli esistono; in sviluppo si lavora con il superuser
 -- locale e la GRANT non è necessaria. Il blocco condizionale rende lo script
 -- eseguibile in entrambi gli ambienti senza modifiche.
+--
+-- Entrambi i ruoli: app_user (web, la prima chiamata quando l'utente avvia
+-- un'azione) E app_worker (il worker stesso, che chiama la stessa funzione
+-- per accodare il passo successivo della pipeline — research -> generate ->
+-- publish). Dimenticare app_worker qui fa fallire silenziosamente ogni
+-- pipeline al primo passaggio di consegne fra un job e il successivo.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
     GRANT EXECUTE ON FUNCTION app_enqueue_job(
       uuid, uuid, uuid, job_type, text, uuid, jsonb, text, boolean, text
     ) TO app_user;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_worker') THEN
+    GRANT EXECUTE ON FUNCTION app_enqueue_job(
+      uuid, uuid, uuid, job_type, text, uuid, jsonb, text, boolean, text
+    ) TO app_worker;
   END IF;
 END
 $$;

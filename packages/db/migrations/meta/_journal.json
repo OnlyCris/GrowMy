@@ -15,6 +15,13 @@
       "when": 1786055917820,
       "tag": "0001_old_veda",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786068294845,
+      "tag": "0002_grant_worker_enqueue_job",
+      "breakpoints": true
     }
   ]
 }
