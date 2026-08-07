@@ -35,7 +35,8 @@ import {
 
 export interface RouterConfig {
   order: ProviderName[];
-  google?: { apiKey: string; model?: string };
+  /** Più chiavi/modelli: il provider Google ruota fra tutte le combinazioni. */
+  google?: { apiKeys: string[]; models?: string[] };
   deepseek?: { apiKey: string; baseUrl?: string; model?: string };
   anthropic?: { apiKey: string; model?: string };
   openai?: { apiKey: string; model?: string };
@@ -62,12 +63,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function createLlmRouter(config: RouterConfig): LlmRouter {
   const providers = new Map<ProviderName, LlmProvider>();
 
-  if (config.google?.apiKey) {
+  if (config.google?.apiKeys.length) {
     providers.set(
       'google',
       createGoogleProvider({
-        apiKey: config.google.apiKey,
-        model: config.google.model,
+        apiKeys: config.google.apiKeys,
+        models: config.google.models,
       }),
     );
   }
@@ -191,11 +192,22 @@ export function createLlmRouterFromEnv(logger?: Logger): LlmRouter {
       ['google', 'deepseek', 'anthropic', 'openai', 'openrouter'].includes(name),
     );
 
+  // Più chiavi/modelli separati da virgola: bucket di quota indipendenti,
+  // vedi il commento in `providers/google.ts` su perché conta.
+  const googleApiKeys = (process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const googleModels = (process.env.GOOGLE_GENERATIVE_AI_MODELS ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+
   return createLlmRouter({
     order,
     logger,
-    google: process.env.GOOGLE_GENERATIVE_AI_API_KEY
-      ? { apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY }
+    google: googleApiKeys.length
+      ? { apiKeys: googleApiKeys, models: googleModels.length ? googleModels : undefined }
       : undefined,
     deepseek: process.env.DEEPSEEK_API_KEY
       ? {

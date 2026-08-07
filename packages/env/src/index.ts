@@ -127,7 +127,19 @@ export const env = createEnv({
      * documentazione. Un `.startsWith('AIza')` qui avrebbe fatto fallire il
      * boot per una chiave perfettamente valida.
      */
+    /**
+     * Una o più chiavi separate da virgola: ogni chiave ha un bucket di quota
+     * indipendente sul piano gratuito di AI Studio, il router (`@growmy/ai`)
+     * ruota fra tutte per non saturarne una sola. Una singola chiave resta
+     * valida — la virgola è opzionale con un solo valore.
+     */
     GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+    /**
+     * Uno o più modelli separati da virgola, stesso motivo: modelli diversi
+     * con la STESSA chiave hanno bucket di quota indipendenti. Default nel
+     * router se non impostata.
+     */
+    GOOGLE_GENERATIVE_AI_MODELS: z.string().min(1).optional(),
 
     /**
      * OpenRouter. Un solo endpoint OpenAI-compatibile davanti a decine di
@@ -228,6 +240,7 @@ export const env = createEnv({
     DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL,
     GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    GOOGLE_GENERATIVE_AI_MODELS: process.env.GOOGLE_GENERATIVE_AI_MODELS,
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     OPENROUTER_MODEL: process.env.OPENROUTER_MODEL,
     LLM_PROVIDER_ORDER: process.env.LLM_PROVIDER_ORDER,
