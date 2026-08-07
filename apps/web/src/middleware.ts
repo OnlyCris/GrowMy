@@ -72,8 +72,23 @@ export async function middleware(request: NextRequest) {
   // Stessa app, stessa porta — la Caddy dell'host smista blog.menuisland.it
   // qui per TLS, non per contenuto (vedi docker/caddy/blog.menuisland.it.caddy).
   // Il contenuto lo decide questo controllo sull'header Host.
+  //
+  // `/api/health` e `/api/ready` sono ESCLUSI a prescindere dall'host: li
+  // interroga l'healthcheck Docker con `fetch('http://127.0.0.1:3000/...')`,
+  // Host "127.0.0.1", diverso da APP_HOSTNAME — senza questa esclusione
+  // finivano riscritti verso `/sites/127.0.0.1/api/ready`, un 404, e il
+  // container veniva segnato "unhealthy" pur essendo perfettamente
+  // funzionante. Stessa ragione per cui la Caddy del dominio blog li blocca
+  // già dall'esterno: non sono contenuto pubblico, sono infrastruttura.
   const hostname = request.headers.get('host')?.split(':')[0]?.toLowerCase() ?? '';
-  const isBlogDomain = Boolean(hostname) && hostname !== APP_HOSTNAME && hostname !== 'localhost';
+  const isHealthCheck =
+    request.nextUrl.pathname === '/api/health' || request.nextUrl.pathname === '/api/ready';
+  const isBlogDomain =
+    !isHealthCheck &&
+    Boolean(hostname) &&
+    hostname !== APP_HOSTNAME &&
+    hostname !== 'localhost' &&
+    hostname !== '127.0.0.1';
 
   if (isBlogDomain) {
     // Nessuna sessione Supabase da rinnovare: i cookie dell'app sono legati
