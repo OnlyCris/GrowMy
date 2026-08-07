@@ -38,6 +38,15 @@ export const products = pgTable(
     domain: text('domain').notNull(),
     /** URL completo con schema, usato per crawling e link assoluti. */
     websiteUrl: text('website_url').notNull(),
+    /**
+     * Dominio personalizzato (es. 'blog.menuisland.it') su cui GrowMy stesso
+     * serve la vetrina pubblica degli articoli pubblicati di questo prodotto —
+     * GrowMy non è solo il backend che li genera, ospita anche il blog letto
+     * dai visitatori reali. Risolto in `middleware.ts` via header Host, letto
+     * qui perché il DNS/TLS del dominio (Caddy sull'host, certbot) sono già
+     * configurati fuori da questo repo. NULL = nessuna vetrina pubblica.
+     */
+    blogDomain: text('blog_domain'),
 
     status: productStatusEnum('status').notNull().default('onboarding'),
 
@@ -98,6 +107,13 @@ export const products = pgTable(
     uniqueIndex('products_org_domain_uq')
       .on(t.organizationId, sql`lower(${t.domain})`)
       .where(sql`${t.deletedAt} is null`),
+    // Globale, non per organizzazione: un dominio reale (blog.menuisland.it)
+    // può risolvere a un solo prodotto in tutto il sistema, non solo
+    // all'interno della stessa organizzazione — è il middleware che lo
+    // risolve via header Host, ambiguità qui sarebbe un bug di routing.
+    uniqueIndex('products_blog_domain_uq')
+      .on(sql`lower(${t.blogDomain})`)
+      .where(sql`${t.blogDomain} is not null and ${t.deletedAt} is null`),
     index('products_org_status_idx').on(t.organizationId, t.status),
     // Query calda del cron giornaliero: "quali prodotti attivi devo processare?"
     index('products_active_scheduling_idx')

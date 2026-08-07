@@ -1,0 +1,2 @@
+ALTER TABLE "products" ADD COLUMN "blog_domain" text;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "products_blog_domain_uq" ON "products" USING btree (lower("blog_domain")) WHERE "products"."blog_domain" is not null and "products"."deleted_at" is null;

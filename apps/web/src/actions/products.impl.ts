@@ -84,21 +84,39 @@ export const updateProductSettings = createSafeAction(
     audit: { targetType: 'product', getTargetId: (input) => input.productId },
   },
   async ({ input }) => {
-    await db
-      .update(products)
-      .set({
-        name: input.name,
-        contentLanguage: input.contentLanguage,
-        timezone: input.timezone,
-        publishHour: input.publishHour,
-        activeWeekdays: input.activeWeekdays,
-        targetWordCountMin: input.targetWordCountMin,
-        targetWordCountMax: input.targetWordCountMax,
-        autoApproveBrief: input.autoApproveBrief,
-        autoApproveDraft: input.autoApproveDraft,
-        approvalTimeoutHours: input.approvalTimeoutHours,
-      })
-      .where(eq(products.id, input.productId));
+    try {
+      await db
+        .update(products)
+        .set({
+          name: input.name,
+          blogDomain: input.blogDomain,
+          contentLanguage: input.contentLanguage,
+          timezone: input.timezone,
+          publishHour: input.publishHour,
+          activeWeekdays: input.activeWeekdays,
+          targetWordCountMin: input.targetWordCountMin,
+          targetWordCountMax: input.targetWordCountMax,
+          autoApproveBrief: input.autoApproveBrief,
+          autoApproveDraft: input.autoApproveDraft,
+          approvalTimeoutHours: input.approvalTimeoutHours,
+        })
+        .where(eq(products.id, input.productId));
+    } catch (error) {
+      // 23505 = unique_violation: `products_blog_domain_uq` blocca due
+      // prodotti (di qualunque organizzazione) con lo stesso dominio blog —
+      // il middleware non saprebbe a chi instradarlo.
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error as { code?: string }).code === '23505'
+      ) {
+        throw new ActionError(
+          'CONFLICT',
+          'Questo dominio blog è già collegato a un altro prodotto.',
+        );
+      }
+      throw error;
+    }
 
     return { id: input.productId };
   },

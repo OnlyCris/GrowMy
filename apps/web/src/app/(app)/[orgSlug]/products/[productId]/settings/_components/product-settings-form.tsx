@@ -50,6 +50,7 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 interface ProductSettings {
   id: string;
   name: string;
+  blogDomain: string | null;
   contentLanguage: string;
   timezone: string;
   publishHour: number;
@@ -63,6 +64,7 @@ interface ProductSettings {
 
 export function ProductSettingsForm({ product }: { product: ProductSettings }) {
   const [name, setName] = React.useState(product.name);
+  const [blogDomain, setBlogDomain] = React.useState(product.blogDomain ?? '');
   const [contentLanguage, setContentLanguage] = React.useState(product.contentLanguage);
   const [timezone, setTimezone] = React.useState(product.timezone);
   const [publishHour, setPublishHour] = React.useState(product.publishHour);
@@ -105,6 +107,7 @@ export function ProductSettingsForm({ product }: { product: ProductSettings }) {
       const result = await updateProductSettingsAction({
         productId: product.id,
         name,
+        blogDomain,
         contentLanguage,
         timezone,
         publishHour,
@@ -140,6 +143,23 @@ export function ProductSettingsForm({ product }: { product: ProductSettings }) {
             aria-invalid={fieldErrors.name ? true : undefined}
           />
           <FormError messages={fieldErrors.name} />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="settings-blog-domain">Dominio della vetrina blog</Label>
+          <Input
+            id="settings-blog-domain"
+            placeholder="blog.tuosito.it"
+            value={blogDomain}
+            onChange={(event) => setBlogDomain(event.target.value)}
+            aria-invalid={fieldErrors.blogDomain ? true : undefined}
+          />
+          <p className="text-xs text-foreground-muted">
+            Se impostato, GrowMy serve qui la vetrina pubblica degli articoli
+            pubblicati. Il DNS del dominio deve puntare già al server — questo
+            campo dice all&rsquo;app come riconoscerlo, non lo registra da solo.
+          </p>
+          <FormError messages={fieldErrors.blogDomain} />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

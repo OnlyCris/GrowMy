@@ -11,6 +11,7 @@ import {
   articles,
   getWorkerDb,
   integrations,
+  products,
 } from '@growmy/db';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 
@@ -107,17 +108,31 @@ export async function processArticlePublish(
     )
     .limit(1);
 
-  if (!integration) {
-    // Non è un errore transitorio: senza integrazione non si pubblicherà mai.
+  // Nessuna integrazione esterna configurata: se il prodotto ha una vetrina
+  // blog propria (GrowMy stesso serve gli articoli, vedi `blog_domain` e
+  // `apps/web/src/app/sites/[hostname]`), quella BASTA — non serve un CMS
+  // esterno per "pubblicare" quando l'articolo diventa visibile semplicemente
+  // cambiando stato nel nostro stesso database.
+  const [product] = integration
+    ? []
+    : await db
+        .select({ blogDomain: products.blogDomain })
+        .from(products)
+        .where(eq(products.id, article.productId))
+        .limit(1);
+
+  if (!integration && !product?.blogDomain) {
+    // Non è un errore transitorio: senza un modo di pubblicare non si
+    // pubblicherà mai, che sia un CMS esterno o la vetrina propria.
     throw new PublishError(
       'Nessuna integrazione primaria configurata',
       'NO_PRIMARY_INTEGRATION',
       false,
-      'Nessun CMS collegato a questo prodotto. Configura un’integrazione dalle impostazioni.',
+      'Nessun CMS collegato e nessun dominio blog configurato per questo prodotto. Configura almeno uno dei due dalle impostazioni.',
     );
   }
 
-  if (integration.status === 'disabled') {
+  if (integration?.status === 'disabled') {
     throw new PublishError(
       'Integrazione disattivata',
       'INTEGRATION_DISABLED',
@@ -147,6 +162,51 @@ export async function processArticlePublish(
       level: 'warn',
       message: `L’articolo non è in stato pubblicabile (stato: ${article.status}).`,
     });
+    return;
+  }
+
+  // --- Pubblicazione diretta sulla vetrina GrowMy (nessuna integrazione) --
+  // Niente adapter, niente tentativo remoto da tracciare in
+  // `article_publications` (quella tabella esiste per i fallimenti di un CMS
+  // esterno — qui non ce n'è uno, l'unico modo di fallire è un errore del
+  // nostro stesso database, già gestito dal meccanismo generico di retry del
+  // job in `index.ts`). Un semplice cambio di stato è l'intera "pubblicazione".
+  if (!integration) {
+    const publishedUrl = `https://${product!.blogDomain}/${article.slug}`;
+
+    await db
+      .update(articles)
+      .set({
+        status: 'published',
+        publishedUrl,
+        publishedAt: new Date(),
+        failureReason: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(articles.id, articleId));
+
+    const reservationId = payload.reservationId ?? reservationIdFromPayload(job.payload);
+    if (reservationId) {
+      await consumeReservation({
+        organizationId: job.organizationId,
+        productId: article.productId,
+        articleId,
+        reservationId,
+      });
+    }
+
+    await recordUsage({
+      organizationId: job.organizationId,
+      productId: article.productId,
+      field: 'articlesPublished',
+    });
+
+    await recorder.event({
+      step: 'publish.done',
+      message: `Pubblicato sulla vetrina blog: ${publishedUrl}`,
+    });
+
+    logger.info({ articleId, publishedUrl }, 'articolo pubblicato (vetrina interna)');
     return;
   }
 

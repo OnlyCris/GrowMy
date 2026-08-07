@@ -36,6 +36,13 @@
       "when": 1786073312263,
       "tag": "0004_keyword_pillar_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786092162599,
+      "tag": "0005_product_blog_domain",
+      "breakpoints": true
     }
   ]
 }

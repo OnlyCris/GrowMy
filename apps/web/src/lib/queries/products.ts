@@ -34,6 +34,7 @@ export async function getProductById(organizationId: string, productId: string) 
       name: products.name,
       domain: products.domain,
       websiteUrl: products.websiteUrl,
+      blogDomain: products.blogDomain,
       status: products.status,
       contentLanguage: products.contentLanguage,
       timezone: products.timezone,

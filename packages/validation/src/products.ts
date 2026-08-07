@@ -63,10 +63,32 @@ export const createProductSchema = z
   })
   .strict();
 
+/**
+ * Dominio della vetrina blog pubblica (es. "blog.acme.com"), risolto in
+ * `middleware.ts` via header Host. Stringa vuota = nessuna vetrina, non un
+ * dominio non valido — il DNS/TLS del dominio restano da configurare fuori
+ * da GrowMy prima che qualcosa vi risponda davvero.
+ */
+const blogDomainField = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(LIMITS.domain)
+  .refine(
+    (value) =>
+      value === '' ||
+      /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+        value,
+      ),
+    'Inserisci un dominio valido (es. "blog.acme.com") o lascia vuoto per nessuna vetrina pubblica.',
+  )
+  .transform((value) => (value === '' ? null : value));
+
 export const updateProductSettingsSchema = z
   .object({
     productId: uuid,
     name: z.string().trim().min(1, 'Dai un nome al prodotto.').max(LIMITS.name),
+    blogDomain: blogDomainField,
     contentLanguage: z
       .string()
       .trim()
