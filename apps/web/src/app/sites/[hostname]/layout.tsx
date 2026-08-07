@@ -34,12 +34,27 @@ export default async function BlogLayout({
           <Link href="/" className="text-base font-semibold tracking-tight text-foreground">
             {product.name}
           </Link>
+          {product.websiteUrl ? (
+            <a
+              href={product.websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-[var(--radius-md)] bg-foreground px-3.5 py-1.5 text-sm font-medium text-background hover:opacity-90"
+            >
+              Prova {product.name}
+            </a>
+          ) : null}
         </div>
       </header>
       <main className="flex-1">{children}</main>
       <footer className="border-t border-border">
-        <div className="mx-auto w-full max-w-3xl px-4 py-6 text-xs text-foreground-subtle sm:px-6">
-          © {new Date().getFullYear()} {product.name}
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-1 px-4 py-6 text-xs text-foreground-subtle sm:px-6">
+          <span>© {new Date().getFullYear()} {product.name}</span>
+          {product.websiteUrl ? (
+            <a href={product.websiteUrl} target="_blank" rel="noopener noreferrer" className="hover:text-foreground hover:underline">
+              {product.websiteUrl.replace(/^https?:\/\//, '')}
+            </a>
+          ) : null}
         </div>
       </footer>
     </div>

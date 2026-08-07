@@ -108,6 +108,22 @@ export default async function BlogArticlePage({
         dangerouslySetInnerHTML={{ __html: contentHtml }}
       />
 
+      {product.websiteUrl ? (
+        <div className="mt-12 flex flex-col items-start gap-3 rounded-[var(--radius-lg)] border border-border bg-surface-muted p-6 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-foreground">
+            Gestisci il tuo locale con {product.name}.
+          </p>
+          <a
+            href={product.websiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 rounded-[var(--radius-md)] bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+          >
+            Scopri {product.name} →
+          </a>
+        </div>
+      ) : null}
+
       {related.length > 0 ? (
         <nav aria-label="Articoli correlati" className="mt-16 border-t border-border pt-8">
           <h2 className="text-sm font-semibold text-foreground">Continua a leggere</h2>
