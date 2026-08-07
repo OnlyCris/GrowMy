@@ -4,6 +4,7 @@ import { computeQualityScore, countWords, normalizeSlug } from '@growmy/core';
 import { articleVersions, articles, db } from '@growmy/db';
 import { createManualArticleSchema, deleteArticleSchema } from '@growmy/validation';
 import { and, eq, isNull } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache';
 
 import { getArticleOrganizationId } from '@/lib/queries/review';
 import { getProductOrganizationId } from '@/lib/queries/products';
@@ -91,6 +92,9 @@ export const createManualArticle = createSafeAction(
       .set({ currentVersionId: version.id, qualityScore: quality })
       .where(eq(articles.id, articleId));
 
+    revalidatePath(`/${membership.organizationSlug}/products/${input.productId}/articles`);
+    revalidatePath(`/${membership.organizationSlug}/review`);
+
     return { articleId };
   },
 );
@@ -120,11 +124,15 @@ export const deleteArticle = createSafeAction(
           isNull(articles.deletedAt),
         ),
       )
-      .returning({ id: articles.id });
+      .returning({ id: articles.id, productId: articles.productId });
 
     if (updated.length === 0) {
       throw new ActionError('NOT_FOUND', 'Articolo non trovato.');
     }
+
+    revalidatePath(`/${membership.organizationSlug}/products/${updated[0].productId}/articles`);
+    revalidatePath(`/${membership.organizationSlug}/products`);
+    revalidatePath(`/${membership.organizationSlug}/review`);
 
     return { id: input.articleId };
   },

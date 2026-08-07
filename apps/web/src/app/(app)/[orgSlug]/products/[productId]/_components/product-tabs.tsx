@@ -23,7 +23,10 @@ export function ProductTabs({
   ];
 
   return (
-    <nav className="flex gap-1 border-b border-border" aria-label="Sezioni prodotto">
+    <nav
+      className="flex gap-1 overflow-x-auto border-b border-border"
+      aria-label="Sezioni prodotto"
+    >
       {tabs.map((tab) => {
         // `startsWith`: la scheda "Articoli" resta attiva anche sul
         // dettaglio di un singolo articolo (`/articles/[articleId]`).
@@ -33,7 +36,7 @@ export function ProductTabs({
             key={tab.href}
             href={tab.href}
             className={cn(
-              'border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150',
+              'shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150',
               active
                 ? 'border-base-900 text-foreground'
                 : 'border-transparent text-foreground-muted hover:text-foreground',

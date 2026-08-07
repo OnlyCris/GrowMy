@@ -3,6 +3,7 @@ import 'server-only';
 import { auditLogs, db, products } from '@growmy/db';
 import { createProductSchema, updateProductSettingsSchema } from '@growmy/validation';
 import { eq } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache';
 
 import { getProductOrganizationId } from '@/lib/queries/products';
 
@@ -70,6 +71,8 @@ export const createProduct = createSafeAction(
       metadata: { traceId, domain: created.domain },
     });
 
+    revalidatePath(`/${membership.organizationSlug}/products`);
+
     return { id: created.id, name: created.name };
   },
 );
@@ -83,7 +86,7 @@ export const updateProductSettings = createSafeAction(
     resolveTenant: (input) => getProductOrganizationId(input.productId),
     audit: { targetType: 'product', getTargetId: (input) => input.productId },
   },
-  async ({ input }) => {
+  async ({ input, membership }) => {
     try {
       await db
         .update(products)
@@ -117,6 +120,9 @@ export const updateProductSettings = createSafeAction(
       }
       throw error;
     }
+
+    revalidatePath(`/${membership.organizationSlug}/products`);
+    revalidatePath(`/${membership.organizationSlug}/products/${input.productId}/settings`);
 
     return { id: input.productId };
   },

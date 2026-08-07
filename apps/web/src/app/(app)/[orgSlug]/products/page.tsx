@@ -61,29 +61,58 @@ export default async function ProductsPage({ params }: ProductsPageProps) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((product) => (
-            <Card key={product.id} className="flex flex-col gap-3 p-5">
+            <Card key={product.id} className="flex flex-col gap-4 p-5">
               <Link
                 href={`/${orgSlug}/products/${product.id}/settings`}
                 className="flex items-start justify-between gap-2"
               >
-                <div>
-                  <h2 className="text-sm font-semibold text-foreground hover:underline">
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-semibold text-foreground hover:underline">
                     {product.name}
                   </h2>
-                  <p className="text-xs text-foreground-muted">{product.domain}</p>
+                  <p className="truncate text-xs text-foreground-muted">{product.domain}</p>
                 </div>
                 <ProductStatusBadge status={product.status} />
               </Link>
+
+              <div className="flex items-center gap-4 rounded-[var(--radius-md)] bg-surface-muted px-3 py-2">
+                <div>
+                  <p className="text-lg font-semibold tabular text-foreground">
+                    {product.publishedArticleCount}
+                  </p>
+                  <p className="text-2xs text-foreground-muted">
+                    {product.publishedArticleCount === 1 ? 'articolo pubblicato' : 'articoli pubblicati'}
+                  </p>
+                </div>
+                <div className="h-8 w-px bg-border" aria-hidden="true" />
+                <div>
+                  <p className="text-lg font-semibold tabular text-foreground">
+                    {product.keywordCount}
+                  </p>
+                  <p className="text-2xs text-foreground-muted">
+                    {product.keywordCount === 1 ? 'keyword' : 'keyword'}
+                  </p>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-foreground-subtle">
                   Aggiornato {formatRelativeTime(product.updatedAt)}
                 </p>
-                <Link
-                  href={`/${orgSlug}/products/${product.id}/articles`}
-                  className="text-xs text-info-700 underline underline-offset-4 hover:no-underline"
-                >
-                  Articoli
-                </Link>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href={`/${orgSlug}/products/${product.id}/keywords`}
+                    className="text-xs text-info-700 underline underline-offset-4 hover:no-underline"
+                  >
+                    Keyword
+                  </Link>
+                  <Link
+                    href={`/${orgSlug}/products/${product.id}/articles`}
+                    className="text-xs text-info-700 underline underline-offset-4 hover:no-underline"
+                  >
+                    Articoli
+                  </Link>
+                </div>
               </div>
             </Card>
           ))}

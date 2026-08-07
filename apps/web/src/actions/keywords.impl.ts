@@ -8,6 +8,7 @@ import {
   reviewKeywordSchema,
 } from '@growmy/validation';
 import { and, eq, isNull } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache';
 
 import { enqueueJob, mapDatabaseError } from '@/lib/jobs';
 import { getKeywordById, getKeywordOrganizationId } from '@/lib/queries/keywords';
@@ -41,6 +42,9 @@ export const addKeyword = createSafeAction(
           createdBy: membership.userId,
         })
         .returning({ id: keywords.id, term: keywords.term });
+
+      revalidatePath(`/${membership.organizationSlug}/products/${input.productId}/keywords`);
+      revalidatePath(`/${membership.organizationSlug}/products`);
 
       return created;
     } catch (error) {
@@ -137,6 +141,10 @@ export const generateArticleFromKeyword = createSafeAction(
       mapDatabaseError(error);
     }
 
+    revalidatePath(`/${membership.organizationSlug}/products/${keyword.productId}/keywords`);
+    revalidatePath(`/${membership.organizationSlug}/products/${keyword.productId}/articles`);
+    revalidatePath(`/${membership.organizationSlug}/review`);
+
     return { articleId };
   },
 );
@@ -170,6 +178,7 @@ export const generateKeywords = createSafeAction(
         reserveCredit: false,
         traceId,
       });
+      revalidatePath(`/${membership.organizationSlug}/products/${input.productId}/keywords`);
       return { jobId };
     } catch (error) {
       mapDatabaseError(error);
@@ -211,6 +220,8 @@ export const reviewKeyword = createSafeAction(
           isNull(keywords.deletedAt),
         ),
       );
+
+    revalidatePath(`/${membership.organizationSlug}/products/${keyword.productId}/keywords`);
 
     const status: 'approved' | 'rejected' =
       input.decision === 'approve' ? 'approved' : 'rejected';

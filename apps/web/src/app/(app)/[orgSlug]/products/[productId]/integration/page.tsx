@@ -2,6 +2,7 @@ import { withUserContext } from '@growmy/db/context';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
+import { AutoRefresh } from '@/components/shared/auto-refresh';
 import { IntegrationHealthBadge } from '@/components/shared/status-badge';
 import { requireOrgMembership } from '@/lib/auth/guards';
 import { getIntegrationForProduct } from '@/lib/queries/integrations';
@@ -44,6 +45,7 @@ export default async function ProductIntegrationPage({
 
   return (
     <div className="flex flex-col gap-3">
+      <AutoRefresh enabled={!integration.lastHealthCheckAt} />
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
           {integration.label ?? 'Webhook'}
@@ -56,7 +58,7 @@ export default async function ProductIntegrationPage({
         </p>
       ) : (
         <p className="text-xs text-foreground-muted">
-          Verifica di connettività in corso — aggiorna fra qualche secondo.
+          Verifica di connettività in corso — lo stato si aggiorna da solo.
         </p>
       )}
       {integration.lastErrorMessage ? (

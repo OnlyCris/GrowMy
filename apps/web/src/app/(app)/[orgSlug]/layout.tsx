@@ -32,11 +32,11 @@ export default async function OrgLayout({
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="border-b border-border">
-        <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-6">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 sm:gap-6">
             <Link
               href={`/${membership.organizationSlug}/review`}
-              className="text-sm font-semibold tracking-tight text-foreground"
+              className="max-w-[10rem] truncate text-sm font-semibold tracking-tight text-foreground sm:max-w-none"
             >
               {membership.organizationName}
             </Link>

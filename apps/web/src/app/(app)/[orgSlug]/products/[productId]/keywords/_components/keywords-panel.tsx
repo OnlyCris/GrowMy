@@ -9,6 +9,7 @@ import {
   generateKeywordsAction,
   reviewKeywordAction,
 } from '@/actions/keywords.actions';
+import { AutoRefresh } from '@/components/shared/auto-refresh';
 import { KeywordStatusBadge } from '@/components/shared/status-badge';
 import { Button } from '@/components/ui/button';
 import { FormError } from '@/components/ui/form-error';
@@ -46,6 +47,17 @@ export function KeywordsPanel({
   const [researchStarted, setResearchStarted] = React.useState(false);
   const [reviewingId, setReviewingId] = React.useState<string | null>(null);
   const [reviewError, setReviewError] = React.useState<string | null>(null);
+  const countBeforeResearchRef = React.useRef(initialKeywords.length);
+
+  // Il server resta la fonte di verità: se `router.refresh()` porta dati
+  // nuovi (vedi <AutoRefresh> sotto), li riflettiamo qui invece di restare
+  // fermi sull'istantanea del primo render — stesso pattern di ReviewQueue.
+  React.useEffect(() => {
+    setKeywords(initialKeywords);
+    if (researchStarted && initialKeywords.length > countBeforeResearchRef.current) {
+      setResearchStarted(false);
+    }
+  }, [initialKeywords, researchStarted]);
 
   function handleAdd(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,6 +100,7 @@ export function KeywordsPanel({
 
   function handleResearch() {
     setResearchError(null);
+    countBeforeResearchRef.current = initialKeywords.length;
     startResearching(async () => {
       const result = await generateKeywordsAction({ productId });
       if (result.ok) {
@@ -137,10 +150,11 @@ export function KeywordsPanel({
           Genera keyword
         </Button>
       </div>
+      <AutoRefresh enabled={researchStarted} />
       {researchStarted ? (
         <p className="text-sm text-foreground-muted">
-          Ricerca avviata. Le nuove proposte compariranno qui sotto tra qualche istante —
-          ricarica la pagina per vederle.
+          Ricerca avviata. Le nuove proposte compariranno qui sotto in automatico,
+          appena pronte.
         </p>
       ) : null}
       <FormError messages={researchError} />

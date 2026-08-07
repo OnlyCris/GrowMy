@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { CheckCheck, Clock, Inbox, Keyboard } from 'lucide-react';
+import { ArrowLeft, CheckCheck, Clock, Inbox, Keyboard } from 'lucide-react';
 import * as React from 'react';
 
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -238,10 +238,21 @@ export function ReviewQueue({
     );
   }
 
+  // Sotto `md` le due colonne non stanno affiancate: c'è spazio per una
+  // sola alla volta. Si mostra la coda finché nulla è selezionato, poi il
+  // dettaglio a schermo intero con un modo per tornare indietro — non uno
+  // stack verticale, che costringerebbe a scorrere oltre l'intero elenco
+  // per raggiungere il pannello di revisione.
   return (
     <div className="flex h-[calc(100vh-8rem)] gap-4">
       {/* --- Colonna coda ------------------------------------------------ */}
-      <div className="flex w-full max-w-sm shrink-0 flex-col rounded-[var(--radius-lg)] border border-border bg-surface md:w-80 lg:w-96">
+      <div
+        className={cn(
+          'flex w-full shrink-0 flex-col rounded-[var(--radius-lg)] border border-border bg-surface md:flex md:w-80 lg:w-96',
+          selected && 'hidden',
+        )}
+      >
+
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Inbox className="size-4" aria-hidden="true" />
@@ -373,7 +384,22 @@ export function ReviewQueue({
       </div>
 
       {/* --- Colonna dettaglio ------------------------------------------- */}
-      <div className="flex min-w-0 flex-1 flex-col rounded-[var(--radius-lg)] border border-border bg-surface p-4">
+      <div
+        className={cn(
+          'min-w-0 flex-1 flex-col rounded-[var(--radius-lg)] border border-border bg-surface p-4 md:flex',
+          selected ? 'flex' : 'hidden',
+        )}
+      >
+        {selected ? (
+          <button
+            type="button"
+            onClick={() => setSelectedId(null)}
+            className="mb-3 inline-flex w-fit items-center gap-1.5 text-xs font-medium text-foreground-muted hover:text-foreground md:hidden"
+          >
+            <ArrowLeft className="size-3.5" aria-hidden="true" />
+            Torna alla coda
+          </button>
+        ) : null}
         {errorMessage ? (
           <div
             role="alert"
