@@ -17,6 +17,8 @@ import type { ChatMessage } from '../provider';
 export interface BrandContext {
   productName: string;
   domain: string;
+  /** URL completo (con schema): è il link "money page" per il backlink interno. */
+  websiteUrl?: string | null;
   language: string;
   businessSummary?: string | null;
   targetAudience?: string | null;
@@ -38,6 +40,7 @@ export function untrustedBlock(label: string, content: string): string {
 function brandBlock(brand: BrandContext): string {
   const lines = [
     `Sito: ${brand.productName} (${brand.domain})`,
+    ...(brand.websiteUrl ? [`URL del sito: ${brand.websiteUrl}`] : []),
     `Lingua di scrittura: ${brand.language}`,
   ];
 
@@ -163,7 +166,7 @@ ${
 
 ${
   params.internalLinkCandidates.length > 0
-    ? `Articoli già pubblicati su questo sito, verso cui puoi pianificare link interni:\n${untrustedBlock(
+    ? `Articoli già pubblicati o approvati su questo sito. Pianifica un link interno verso ALMENO 1-2 di questi (quelli davvero pertinenti al tema, mai forzati) in "internalLinkTargets":\n${untrustedBlock(
         'articoli_esistenti',
         params.internalLinkCandidates
           .map((a) => `${a.articleId} | ${a.title}`)
@@ -171,6 +174,9 @@ ${
       )}`
     : ''
 }
+
+Includi SEMPRE un'ultima sezione FAQ: 3 domande reali che il lettore si porrebbe,
+con "heading" = la domanda stessa, pensata per i featured snippet di Google.
 
 Formato:
 {
@@ -220,7 +226,14 @@ Formato di output: Markdown puro.
 - Nessun H1: il titolo viaggia separato nei metadati.
 - Sezioni con ##, sottosezioni con ###.
 - Grassetto solo su dati e termini chiave, mai su frasi intere.
-- I link interni pianificati vanno inseriti come [testo](/slug-articolo).
+- I link interni pianificati in "internalLinkTargets" vanno inseriti come
+  [testo](/slug-articolo), naturali nel flusso della frase, mai in una lista
+  a parte.
+- Immagini: NON generare né inventare URL di immagini. Se in futuro il brief
+  fornirà un elenco di immagini disponibili, andranno usate con la sintassi
+  Markdown standard ![testo alternativo descrittivo](url) — il testo
+  alternativo descrive il contenuto della foto per chi non la vede, mai il
+  nome del file o una didascalia generica.
 
 Rispondi SOLO con JSON valido.`,
     },
@@ -230,6 +243,12 @@ Rispondi SOLO con JSON valido.`,
 
 Brief approvato da seguire:
 ${untrustedBlock('brief', JSON.stringify(params.brief, null, 2))}
+
+${
+  params.brand.websiteUrl
+    ? `Inserisci ESATTAMENTE UN link naturale verso ${params.brand.websiteUrl}, vicino alla CTA finale o in chiusura — una frase che inviti il lettore a scoprire ${params.brand.productName}, mai una lista di link o un inserimento forzato a metà paragrafo.`
+    : ''
+}
 
 ${
   params.humanFeedback

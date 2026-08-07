@@ -7,7 +7,7 @@ import {
   productBrandProfiles,
   products,
 } from '@growmy/db';
-import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 
 import type { ProcessorContext } from './types';
 
@@ -49,6 +49,7 @@ export async function processArticleResearch(
       productId: products.id,
       productName: products.name,
       domain: products.domain,
+      websiteUrl: products.websiteUrl,
       contentLanguage: products.contentLanguage,
       targetWordCountMin: products.targetWordCountMin,
       targetWordCountMax: products.targetWordCountMax,
@@ -80,6 +81,7 @@ export async function processArticleResearch(
   const brand: BrandContext = {
     productName: row.productName,
     domain: row.domain,
+    websiteUrl: row.websiteUrl,
     language: row.contentLanguage,
     businessSummary: row.businessSummary,
     targetAudience: row.targetAudience,
@@ -89,8 +91,13 @@ export async function processArticleResearch(
   };
 
   // --- Candidati per i link interni ---------------------------------------
-  // Solo articoli già pubblicati dello stesso prodotto: linkare una bozza
-  // produrrebbe un 404 sul sito del cliente.
+  // Pubblicati O approvati: un articolo `approved` è già in coda di
+  // pubblicazione (stessa infornata editoriale) e avrà uno slug stabile prima
+  // che questo venga letto — restringere a solo `published` significa che il
+  // primissimo lotto di articoli di un prodotto non riesce mai a linkarsi a
+  // vicenda, perché nessuno dei fratelli è ancora `published` quando la
+  // ricerca di ciascuno parte. `draft_ready`/`brief_ready` restano esclusi:
+  // potrebbero ancora essere rifiutati, e lo slug non è definitivo.
   const linkCandidates = await recorder.step(
     'research.internal_links',
     'Raccolta degli articoli collegabili',
@@ -105,7 +112,7 @@ export async function processArticleResearch(
         .where(
           and(
             eq(articles.productId, row.productId),
-            eq(articles.status, 'published'),
+            inArray(articles.status, ['published', 'approved']),
             ne(articles.id, articleId),
             isNotNull(articles.slug),
             isNull(articles.deletedAt),

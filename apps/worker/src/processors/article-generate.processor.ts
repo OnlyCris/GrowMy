@@ -70,6 +70,7 @@ export async function processArticleGenerate(
       productId: products.id,
       productName: products.name,
       domain: products.domain,
+      websiteUrl: products.websiteUrl,
       contentLanguage: products.contentLanguage,
       wordMin: products.targetWordCountMin,
       wordMax: products.targetWordCountMax,
@@ -95,6 +96,7 @@ export async function processArticleGenerate(
   const brand: BrandContext = {
     productName: row.productName,
     domain: row.domain,
+    websiteUrl: row.websiteUrl,
     language: row.contentLanguage,
     businessSummary: row.businessSummary,
     targetAudience: row.targetAudience,
