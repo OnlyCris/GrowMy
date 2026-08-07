@@ -20,6 +20,9 @@ interface KeywordRow {
   term: string;
   status: 'suggested' | 'approved' | 'scheduled' | 'processing' | 'done' | 'rejected';
   priorityScore: string;
+  clusterId: string | null;
+  clusterName: string | null;
+  isPillar: boolean;
 }
 
 export function KeywordsPanel({
@@ -51,7 +54,15 @@ export function KeywordsPanel({
       const result = await addKeywordAction({ productId, term });
       if (result.ok) {
         setKeywords((current) => [
-          { id: result.data.id, term: result.data.term, status: 'approved', priorityScore: '50' },
+          {
+            id: result.data.id,
+            term: result.data.term,
+            status: 'approved',
+            priorityScore: '50',
+            clusterId: null,
+            clusterName: null,
+            isPillar: false,
+          },
           ...current,
         ]);
         setTerm('');
@@ -159,19 +170,38 @@ export function KeywordsPanel({
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
-          {keywords.map((keyword) => {
+          {keywords.map((keyword, index) => {
             const isSuggested = keyword.status === 'suggested';
             const canGenerate = keyword.status === 'approved' || keyword.status === 'scheduled';
+            // Il gruppo cambia quando cambia il cluster: la query ordina già
+            // per clusterId, qui basta rilevare il confine per intestare la
+            // sezione — è quello che rende visibile la struttura a cluster
+            // invece di una lista piatta indistinguibile.
+            const previous = keywords[index - 1];
+            const isNewGroup = !previous || previous.clusterId !== keyword.clusterId;
             return (
-              <li
-                key={keyword.id}
-                className="flex items-center justify-between gap-3 px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-foreground">{keyword.term}</span>
-                  <KeywordStatusBadge status={keyword.status} />
-                </div>
-                <div className="flex items-center gap-2">
+              <React.Fragment key={keyword.id}>
+                {isNewGroup && keyword.clusterName ? (
+                  <li className="bg-surface-muted px-4 py-1.5 text-xs font-medium text-foreground-muted">
+                    {keyword.clusterName}
+                  </li>
+                ) : null}
+                {isNewGroup && !keyword.clusterName && index > 0 ? (
+                  <li className="bg-surface-muted px-4 py-1.5 text-xs font-medium text-foreground-muted">
+                    Senza cluster
+                  </li>
+                ) : null}
+                <li className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-foreground">{keyword.term}</span>
+                    {keyword.isPillar ? (
+                      <span className="rounded-[var(--radius-sm)] border border-border-strong bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">
+                        Pillar
+                      </span>
+                    ) : null}
+                    <KeywordStatusBadge status={keyword.status} />
+                  </div>
+                  <div className="flex items-center gap-2">
                   {isSuggested ? (
                     <>
                       <Button
@@ -208,8 +238,9 @@ export function KeywordsPanel({
                       Genera articolo
                     </Button>
                   ) : null}
-                </div>
-              </li>
+                  </div>
+                </li>
+              </React.Fragment>
             );
           })}
         </ul>

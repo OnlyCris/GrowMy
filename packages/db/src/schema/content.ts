@@ -74,6 +74,15 @@ export const keywords = pgTable(
     status: keywordStatusEnum('status').notNull().default('suggested'),
     source: keywordSourceEnum('source').notNull().default('ai_research'),
 
+    /**
+     * True per la keyword "testa" del cluster: quando il suo articolo viene
+     * creato, diventa il pillar del cluster (`keywordClusters.pillarArticleId`)
+     * — l'articolo verso cui convergono i link interni di tutti gli altri.
+     * Al più una per cluster, deciso in fase di ricerca keyword (vedi
+     * `keywordResearchPrompt`), non modificabile dopo.
+     */
+    isPillar: boolean('is_pillar').notNull().default(false),
+
     // --- Metriche SEO (da provider esterno o stimate) --------------------
     searchVolume: integer('search_volume'),
     /** 0-100. `numeric` e non `float` per evitare drift nei confronti/ordinamenti. */

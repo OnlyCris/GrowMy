@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { articles, db, keywords } from '@growmy/db';
+import { articles, db, keywordClusters, keywords } from '@growmy/db';
 import {
   createKeywordSchema,
   generateArticleSchema,
@@ -106,6 +106,16 @@ export const generateArticleFromKeyword = createSafeAction(
         );
       }
       throw error;
+    }
+
+    // Se questa è la keyword pillar del suo cluster, questo articolo DIVENTA
+    // il pillar: è verso di lui che gli articoli di supporto linkeranno,
+    // deciso una sola volta qui, non modificabile in seguito.
+    if (keyword.isPillar && keyword.clusterId) {
+      await db
+        .update(keywordClusters)
+        .set({ pillarArticleId: articleId })
+        .where(eq(keywordClusters.id, keyword.clusterId));
     }
 
     await db.update(keywords).set({ status: 'processing' }).where(eq(keywords.id, keyword.id));

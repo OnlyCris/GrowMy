@@ -4,13 +4,20 @@ import {
   type BrandContext,
   type KeywordResearchResult,
 } from '@growmy/ai';
-import { getWorkerDb, keywords, productBrandProfiles, products } from '@growmy/db';
-import { and, eq, isNull } from 'drizzle-orm';
+import {
+  getWorkerDb,
+  keywordClusters,
+  keywords,
+  productBrandProfiles,
+  products,
+} from '@growmy/db';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import type { ProcessorContext } from './types';
 
 /**
- * PROCESSORE DI RICERCA KEYWORD — propone keyword nuove per un prodotto.
+ * PROCESSORE DI RICERCA KEYWORD — propone CLUSTER tematici per un prodotto,
+ * non una lista piatta.
  *
  * Non genera per massimizzare la copertura: `keywordResearchPrompt` chiede
  * esplicitamente long-tail coerenti con l'attività, non termini generici ad
@@ -18,10 +25,17 @@ import type { ProcessorContext } from './types';
  * articoli (vedi EDITOR_SYSTEM: correlazione reale col prodotto, non la
  * keyword come pretesto).
  *
+ * Ogni cluster ha una keyword PILLAR e keyword di supporto: è il modello
+ * hub-and-spoke che costruisce autorità tematica invece di articoli isolati
+ * — `keyword_clusters` esisteva già nello schema con un campo
+ * `pillarArticleId` pensato esattamente per questo, mai popolato prima
+ * d'ora. `article-research.processor.ts` lo usa per far linkare ogni
+ * articolo di supporto al pillar del suo cluster.
+ *
  * Le keyword proposte entrano con `status: 'suggested'`: un umano le
  * approva o le scarta dalla pagina Keyword prima che possano generare un
- * articolo — stessa filosofia del cancello di revisione appena introdotto
- * per bozze e brief, non un'eccezione.
+ * articolo — stessa filosofia del cancello di revisione già in vigore per
+ * bozze e brief, non un'eccezione.
  */
 
 interface KeywordResearchPayload {
@@ -30,9 +44,39 @@ interface KeywordResearchPayload {
 
 const DEFAULT_COUNT = 8;
 
-export async function processKeywordResearch(
-  ctx: ProcessorContext,
-): Promise<void> {
+interface KeywordRowInput {
+  term: string;
+  searchIntent?: string;
+  estimatedVolume?: number;
+  estimatedDifficulty?: number;
+  rationale?: string;
+}
+
+function toInsertValues(
+  k: KeywordRowInput,
+  organizationId: string,
+  productId: string,
+  clusterId: string | null,
+  isPillar: boolean,
+) {
+  return {
+    organizationId,
+    productId,
+    clusterId,
+    term: k.term,
+    isPillar,
+    status: 'suggested' as const,
+    source: 'ai_research' as const,
+    searchVolume: Number.isFinite(k.estimatedVolume) ? Math.round(k.estimatedVolume!) : null,
+    difficulty: Number.isFinite(k.estimatedDifficulty)
+      ? String(Math.min(100, Math.max(0, k.estimatedDifficulty!)))
+      : null,
+    searchIntent: k.searchIntent ?? null,
+    priorityRationale: k.rationale ?? null,
+  };
+}
+
+export async function processKeywordResearch(ctx: ProcessorContext): Promise<void> {
   const db = getWorkerDb();
   const { recorder, llm, logger, job } = ctx;
   const productId = job.targetId;
@@ -91,7 +135,7 @@ export async function processKeywordResearch(
 
   const result = await recorder.step(
     'keyword_research.propose',
-    `Ricerca di ${count} keyword pertinenti`,
+    `Ricerca di ${count} keyword pertinenti, organizzate per cluster`,
     async () =>
       llm.complete({
         messages: keywordResearchPrompt({
@@ -106,58 +150,93 @@ export async function processKeywordResearch(
 
   const parsed = parseJsonResponse<KeywordResearchResult>(result.text);
 
-  if (!Array.isArray(parsed.keywords) || parsed.keywords.length === 0) {
-    throw new Error('La ricerca keyword non ha prodotto proposte utilizzabili.');
+  if (!Array.isArray(parsed.clusters) || parsed.clusters.length === 0) {
+    throw new Error('La ricerca keyword non ha prodotto cluster utilizzabili.');
   }
 
-  const rows = parsed.keywords
-    .map((k) => ({
-      term: k.term?.trim().toLowerCase(),
-      searchIntent: k.searchIntent,
-      estimatedVolume: k.estimatedVolume,
-      estimatedDifficulty: k.estimatedDifficulty,
-      rationale: k.rationale,
-    }))
-    .filter((k): k is typeof k & { term: string } => Boolean(k.term));
+  let clustersCreated = 0;
+  let clustersReused = 0;
+  let keywordsInserted = 0;
 
-  const inserted = rows.length
-    ? await db
-        .insert(keywords)
-        .values(
-          rows.map((k) => ({
-            organizationId: job.organizationId,
-            productId,
-            term: k.term,
-            status: 'suggested' as const,
-            source: 'ai_research' as const,
-            searchVolume: Number.isFinite(k.estimatedVolume) ? Math.round(k.estimatedVolume) : null,
-            difficulty: Number.isFinite(k.estimatedDifficulty)
-              ? String(Math.min(100, Math.max(0, k.estimatedDifficulty)))
-              : null,
-            searchIntent: k.searchIntent ?? null,
-            priorityRationale: k.rationale ?? null,
-          })),
-        )
-        // Una keyword già esistente per questo prodotto (stesso termine,
-        // case-insensitive) viene saltata invece di far fallire l'intero lotto:
-        // `keywords_product_term_uq` la respingerebbe comunque.
-        .onConflictDoNothing()
-        .returning({ id: keywords.id })
-    : [];
+  for (const cluster of parsed.clusters) {
+    const clusterName = cluster.name?.trim();
+    if (!clusterName || !cluster.pillarKeyword?.term?.trim()) continue;
+
+    // Riusa un cluster con lo stesso nome (case-insensitive) invece di
+    // accumulare duplicati a ogni giro di ricerca — un prodotto lavora sugli
+    // stessi temi nel tempo, il cluster deve rinforzarsi, non frammentarsi.
+    const [existingCluster] = await db
+      .select({ id: keywordClusters.id })
+      .from(keywordClusters)
+      .where(
+        and(
+          eq(keywordClusters.productId, productId),
+          sql`lower(${keywordClusters.name}) = lower(${clusterName})`,
+        ),
+      )
+      .limit(1);
+
+    let clusterId: string;
+    if (existingCluster) {
+      clusterId = existingCluster.id;
+      clustersReused += 1;
+    } else {
+      const [created] = await db
+        .insert(keywordClusters)
+        .values({
+          organizationId: job.organizationId,
+          productId,
+          name: clusterName,
+        })
+        .returning({ id: keywordClusters.id });
+      clusterId = created.id;
+      clustersCreated += 1;
+    }
+
+    const pillarTerm = cluster.pillarKeyword.term.trim().toLowerCase();
+    const supportingRows = (cluster.supportingKeywords ?? [])
+      .map((k) => ({ ...k, term: k.term?.trim().toLowerCase() }))
+      .filter((k): k is typeof k & { term: string } => Boolean(k.term));
+
+    const values = [
+      toInsertValues(
+        { ...cluster.pillarKeyword, term: pillarTerm },
+        job.organizationId,
+        productId,
+        clusterId,
+        true,
+      ),
+      ...supportingRows.map((k) =>
+        toInsertValues(k, job.organizationId, productId, clusterId, false),
+      ),
+    ];
+
+    const inserted = await db
+      .insert(keywords)
+      .values(values)
+      // Una keyword già esistente per questo prodotto (stesso termine,
+      // case-insensitive) viene saltata invece di far fallire l'intero lotto:
+      // `keywords_product_term_uq` la respingerebbe comunque.
+      .onConflictDoNothing()
+      .returning({ id: keywords.id });
+
+    keywordsInserted += inserted.length;
+  }
 
   await recorder.event({
     step: 'keyword_research.done',
-    message: `${inserted.length} nuove keyword proposte, in attesa di revisione.`,
+    message: `${keywordsInserted} nuove keyword proposte in ${clustersCreated + clustersReused} cluster (${clustersCreated} nuovi), in attesa di revisione.`,
     details: {
-      proposed: rows.length,
-      inserted: inserted.length,
+      keywordsInserted,
+      clustersCreated,
+      clustersReused,
       provider: result.provider,
       costMicroUsd: result.costMicroUsd,
     },
   });
 
   logger.info(
-    { productId, proposed: rows.length, inserted: inserted.length, provider: result.provider },
+    { productId, keywordsInserted, clustersCreated, clustersReused, provider: result.provider },
     'ricerca keyword completata',
   );
 }

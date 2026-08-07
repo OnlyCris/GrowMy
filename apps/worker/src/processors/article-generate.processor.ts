@@ -310,7 +310,13 @@ export async function processArticleGenerate(
     throw new Error('La stesura non ha prodotto un articolo utilizzabile.');
   }
 
-  const slug = normalizeSlug(draft.slug || draft.title);
+  // Derivato dalla KEYWORD, non dallo slug libero del modello: lo slug
+  // dell'LLM era spesso poco leggibile (troppo generico, parole d'ordine
+  // fuori posto, a volte lontano dall'argomento reale). La keyword è già
+  // ciò per cui l'articolo deve posizionarsi — usarla anche come URL rende
+  // l'indirizzo immediatamente interpretabile, sia per un lettore sia per un
+  // motore di ricerca, invece di doversi fidare della fantasia del modello.
+  const slug = normalizeSlug(keyword || draft.slug || draft.title);
 
   const [version] = await db
     .insert(articleVersions)

@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { db, keywords } from '@growmy/db';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { db, keywordClusters, keywords } from '@growmy/db';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 
 /**
  * QUERY DELLE KEYWORD. Stessa disciplina di `lib/queries/products.ts`:
@@ -9,6 +9,11 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
  * anche con RLS attivo.
  */
 
+/**
+ * Ordina per cluster (pillar prima dei suoi compagni) invece che solo per
+ * priorità: è quello che rende visibile in UI la struttura hub-and-spoke,
+ * non solo la lista piatta.
+ */
 export async function getKeywordsForProduct(productId: string) {
   return db
     .select({
@@ -18,10 +23,19 @@ export async function getKeywordsForProduct(productId: string) {
       source: keywords.source,
       priorityScore: keywords.priorityScore,
       createdAt: keywords.createdAt,
+      clusterId: keywords.clusterId,
+      clusterName: keywordClusters.name,
+      isPillar: keywords.isPillar,
     })
     .from(keywords)
+    .leftJoin(keywordClusters, eq(keywordClusters.id, keywords.clusterId))
     .where(and(eq(keywords.productId, productId), isNull(keywords.deletedAt)))
-    .orderBy(desc(keywords.priorityScore), desc(keywords.createdAt));
+    .orderBy(
+      asc(keywords.clusterId),
+      desc(keywords.isPillar),
+      desc(keywords.priorityScore),
+      desc(keywords.createdAt),
+    );
 }
 
 /**
@@ -47,6 +61,8 @@ export async function getKeywordById(keywordId: string, organizationId: string) 
       productId: keywords.productId,
       term: keywords.term,
       status: keywords.status,
+      clusterId: keywords.clusterId,
+      isPillar: keywords.isPillar,
     })
     .from(keywords)
     .where(

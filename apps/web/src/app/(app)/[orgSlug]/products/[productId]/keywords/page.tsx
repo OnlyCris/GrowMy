@@ -37,6 +37,9 @@ export default async function ProductKeywordsPage({
         term: k.term,
         status: k.status,
         priorityScore: k.priorityScore,
+        clusterId: k.clusterId,
+        clusterName: k.clusterName,
+        isPillar: k.isPillar,
       }))}
     />
   );

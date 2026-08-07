@@ -1,0 +1,1 @@
+ALTER TABLE "keywords" ADD COLUMN "is_pillar" boolean DEFAULT false NOT NULL;
