@@ -65,6 +65,15 @@ cd "$APP_DIR" || die "Directory non trovata: ${APP_DIR}"
 [[ -f "$COMPOSE_FILE" ]] || die "docker-compose.yml non trovato."
 [[ -f "${APP_DIR}/.env" ]] || die ".env non trovato: esegui prima install.sh"
 
+# `--env-file` passa le variabili a Docker Compose, non alla shell di questo
+# script: senza questo source, POSTGRES_PASSWORD resta non definita qui sotto
+# `set -u` e la migrazione (che la legge direttamente in bash, non nel
+# container) fallisce con "unbound variable".
+set -a
+# shellcheck disable=SC1091
+source "${APP_DIR}/.env"
+set +a
+
 # ---------------------------------------------------------------------------
 # 0. Stato attuale
 # ---------------------------------------------------------------------------
