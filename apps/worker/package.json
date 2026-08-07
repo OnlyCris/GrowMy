@@ -17,6 +17,7 @@
     "@growmy/db": "workspace:*",
     "@growmy/env": "workspace:*",
     "@growmy/integrations": "workspace:*",
+    "@growmy/jobs": "workspace:*",
     "@growmy/logger": "workspace:*",
     "bullmq": "^5.28.1",
     "drizzle-orm": "^0.36.4",

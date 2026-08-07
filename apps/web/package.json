@@ -16,6 +16,7 @@
     "@growmy/db": "workspace:*",
     "@growmy/env": "workspace:*",
     "@growmy/integrations": "workspace:*",
+    "@growmy/jobs": "workspace:*",
     "@growmy/logger": "workspace:*",
     "@growmy/validation": "workspace:*",
 
