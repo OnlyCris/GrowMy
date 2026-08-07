@@ -43,8 +43,13 @@ export interface GoogleProviderConfig {
 export function createGoogleProvider(
   config: GoogleProviderConfig,
 ): LlmProvider {
-  const model = config.model ?? 'gemini-2.0-flash';
-  // Prezzi di gemini-2.0-flash al momento della scrittura.
+  // `-latest` invece di una versione fissata: `gemini-2.0-flash` è stato
+  // ritirato per i nuovi progetti (404 "no longer available to new users")
+  // mentre l'alias restava servibile — scoperto in produzione confrontando le
+  // risposte reali dell'API per la chiave in uso. L'alias assorbe il prossimo
+  // ritiro invece di ripetere lo stesso incidente.
+  const model = config.model ?? 'gemini-flash-latest';
+  // Prezzi indicativi di fascia flash al momento della scrittura.
   const priceIn = config.pricePerMillionInput ?? 0.1;
   const priceOut = config.pricePerMillionOutput ?? 0.4;
 
