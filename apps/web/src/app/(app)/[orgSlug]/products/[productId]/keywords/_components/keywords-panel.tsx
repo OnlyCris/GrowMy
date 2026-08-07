@@ -3,7 +3,12 @@
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
-import { addKeywordAction, generateArticleFromKeywordAction } from '@/actions/keywords.actions';
+import {
+  addKeywordAction,
+  generateArticleFromKeywordAction,
+  generateKeywordsAction,
+  reviewKeywordAction,
+} from '@/actions/keywords.actions';
 import { KeywordStatusBadge } from '@/components/shared/status-badge';
 import { Button } from '@/components/ui/button';
 import { FormError } from '@/components/ui/form-error';
@@ -33,6 +38,11 @@ export function KeywordsPanel({
   const [addError, setAddError] = React.useState<string | null>(null);
   const [generatingId, setGeneratingId] = React.useState<string | null>(null);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
+  const [isResearching, startResearching] = React.useTransition();
+  const [researchError, setResearchError] = React.useState<string | null>(null);
+  const [researchStarted, setResearchStarted] = React.useState(false);
+  const [reviewingId, setReviewingId] = React.useState<string | null>(null);
+  const [reviewError, setReviewError] = React.useState<string | null>(null);
 
   function handleAdd(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,8 +75,65 @@ export function KeywordsPanel({
     });
   }
 
+  function handleResearch() {
+    setResearchError(null);
+    startResearching(async () => {
+      const result = await generateKeywordsAction({ productId });
+      if (result.ok) {
+        setResearchStarted(true);
+      } else {
+        setResearchError(result.message);
+      }
+    });
+  }
+
+  function handleReview(keywordId: string, decision: 'approve' | 'reject') {
+    setReviewError(null);
+    setReviewingId(keywordId);
+    React.startTransition(async () => {
+      const result = await reviewKeywordAction({ keywordId, decision });
+      setReviewingId(null);
+      if (result.ok) {
+        setKeywords((current) =>
+          current.map((keyword) =>
+            keyword.id === keywordId ? { ...keyword, status: result.data.status } : keyword,
+          ),
+        );
+      } else {
+        setReviewError(result.message);
+      }
+    });
+  }
+
   return (
     <div className="flex flex-col gap-6">
+      <div className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-surface-muted px-4 py-3">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium text-foreground">Ricerca keyword con AI</span>
+          <span className="text-xs text-foreground-muted">
+            Propone keyword pertinenti al prodotto, non termini generici ad alto volume — le
+            revisioni tu prima che diventino articoli.
+          </span>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          isLoading={isResearching}
+          loadingLabel="Avvio in corso"
+          onClick={handleResearch}
+        >
+          Genera keyword
+        </Button>
+      </div>
+      {researchStarted ? (
+        <p className="text-sm text-foreground-muted">
+          Ricerca avviata. Le nuove proposte compariranno qui sotto tra qualche istante —
+          ricarica la pagina per vederle.
+        </p>
+      ) : null}
+      <FormError messages={researchError} />
+
       <form onSubmit={handleAdd} className="flex items-end gap-2">
         <div className="flex flex-1 flex-col gap-1.5">
           <Label htmlFor="keyword-term">Nuova keyword</Label>
@@ -84,15 +151,17 @@ export function KeywordsPanel({
       </form>
       <FormError messages={addError} />
       <FormError messages={generateError} />
+      <FormError messages={reviewError} />
 
       {keywords.length === 0 ? (
         <p className="text-sm text-foreground-muted">
-          Nessuna keyword ancora. Aggiungine una per generare il primo articolo.
+          Nessuna keyword ancora. Aggiungine una o genera proposte con l’AI.
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
           {keywords.map((keyword) => {
-            const canGenerate = keyword.status !== 'processing' && keyword.status !== 'done';
+            const isSuggested = keyword.status === 'suggested';
+            const canGenerate = keyword.status === 'approved' || keyword.status === 'scheduled';
             return (
               <li
                 key={keyword.id}
@@ -102,18 +171,44 @@ export function KeywordsPanel({
                   <span className="text-sm text-foreground">{keyword.term}</span>
                   <KeywordStatusBadge status={keyword.status} />
                 </div>
-                {canGenerate ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    isLoading={generatingId === keyword.id}
-                    loadingLabel="Avvio in corso"
-                    onClick={() => handleGenerate(keyword.id)}
-                  >
-                    Genera articolo
-                  </Button>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  {isSuggested ? (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        isLoading={reviewingId === keyword.id}
+                        loadingLabel="…"
+                        onClick={() => handleReview(keyword.id, 'reject')}
+                      >
+                        Scarta
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        isLoading={reviewingId === keyword.id}
+                        loadingLabel="…"
+                        onClick={() => handleReview(keyword.id, 'approve')}
+                      >
+                        Approva
+                      </Button>
+                    </>
+                  ) : null}
+                  {canGenerate ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      isLoading={generatingId === keyword.id}
+                      loadingLabel="Avvio in corso"
+                      onClick={() => handleGenerate(keyword.id)}
+                    >
+                      Genera articolo
+                    </Button>
+                  ) : null}
+                </div>
               </li>
             );
           })}

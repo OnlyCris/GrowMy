@@ -17,6 +17,7 @@ import { processArticlePublish } from './processors/article-publish.processor';
 import { processArticleResearch } from './processors/article-research.processor';
 import { processIntegrationConnect } from './processors/integration-connect.processor';
 import { processIntegrationHealth } from './processors/integration-health.processor';
+import { processKeywordResearch } from './processors/keyword-research.processor';
 import {
   processApprovalTimeoutSweep,
   processDailyDispatch,
@@ -120,6 +121,7 @@ async function enqueueJob(request: EnqueueRequest): Promise<string> {
 
 /** Processori indicizzati per tipo di job del database. */
 const PROCESSORS: Record<string, Processor> = {
+  keyword_research: processKeywordResearch,
   article_research: processArticleResearch,
   article_generate: processArticleGenerate,
   article_publish: processArticlePublish,

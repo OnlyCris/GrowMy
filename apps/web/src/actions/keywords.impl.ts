@@ -1,8 +1,13 @@
 import 'server-only';
 
 import { articles, db, keywords } from '@growmy/db';
-import { createKeywordSchema, generateArticleSchema } from '@growmy/validation';
-import { eq } from 'drizzle-orm';
+import {
+  createKeywordSchema,
+  generateArticleSchema,
+  generateKeywordsSchema,
+  reviewKeywordSchema,
+} from '@growmy/validation';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import { enqueueJob, mapDatabaseError } from '@/lib/jobs';
 import { getKeywordById, getKeywordOrganizationId } from '@/lib/queries/keywords';
@@ -123,5 +128,82 @@ export const generateArticleFromKeyword = createSafeAction(
     }
 
     return { articleId };
+  },
+);
+
+/**
+ * Accoda una ricerca keyword AI per il prodotto. `targetType: 'product'`:
+ * a differenza degli altri job non punta a un articolo ma al prodotto
+ * stesso — stesso pattern libero già usato da `integration_connect` per
+ * `'integration'`. `reserveCredit: false`: nessuna fatturazione attiva,
+ * stessa scelta di tutto il resto della pipeline in questo momento.
+ */
+export const generateKeywords = createSafeAction(
+  {
+    name: 'keywords.generate',
+    schema: generateKeywordsSchema,
+    rateLimit: 'keywords.generate',
+    minimumRole: 'editor',
+    resolveTenant: (input) => getProductOrganizationId(input.productId),
+  },
+  async ({ input, membership, traceId }) => {
+    try {
+      const jobId = await enqueueJob({
+        userId: membership.userId,
+        organizationId: membership.organizationId,
+        productId: input.productId,
+        type: 'keyword_research',
+        targetType: 'product',
+        targetId: input.productId,
+        payload: {},
+        discriminator: `manual-${Date.now()}`,
+        reserveCredit: false,
+        traceId,
+      });
+      return { jobId };
+    } catch (error) {
+      mapDatabaseError(error);
+    }
+  },
+);
+
+/**
+ * Approva o scarta una keyword `suggested`. Un umano decide quali proposte
+ * dell'AI meritano di diventare articoli — non serve accodare nulla, è una
+ * semplice transizione di stato.
+ */
+export const reviewKeyword = createSafeAction(
+  {
+    name: 'keywords.review',
+    schema: reviewKeywordSchema,
+    rateLimit: 'keywords.manage',
+    minimumRole: 'editor',
+    resolveTenant: (input) => getKeywordOrganizationId(input.keywordId),
+  },
+  async ({ input, membership }) => {
+    const keyword = await getKeywordById(input.keywordId, membership.organizationId);
+    if (!keyword) throw new ActionError('NOT_FOUND', 'Keyword non trovata.');
+
+    if (keyword.status !== 'suggested') {
+      throw new ActionError(
+        'CONFLICT',
+        'Questa keyword non è più in attesa di revisione.',
+      );
+    }
+
+    await db
+      .update(keywords)
+      .set({ status: input.decision === 'approve' ? 'approved' : 'rejected' })
+      .where(
+        and(
+          eq(keywords.id, input.keywordId),
+          eq(keywords.status, 'suggested'),
+          isNull(keywords.deletedAt),
+        ),
+      );
+
+    const status: 'approved' | 'rejected' =
+      input.decision === 'approve' ? 'approved' : 'rejected';
+    return { status };
   },
 );

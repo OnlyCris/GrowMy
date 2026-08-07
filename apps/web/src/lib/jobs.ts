@@ -40,7 +40,12 @@ export interface EnqueueJobParams {
   userId: string;
   organizationId: string;
   productId: string;
-  type: 'article_research' | 'article_generate' | 'article_publish' | 'integration_connect';
+  type:
+    | 'keyword_research'
+    | 'article_research'
+    | 'article_generate'
+    | 'article_publish'
+    | 'integration_connect';
   targetType: string;
   targetId: string;
   payload: Record<string, unknown>;

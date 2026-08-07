@@ -28,5 +28,20 @@ export const generateArticleSchema = z
   })
   .strict();
 
+export const generateKeywordsSchema = z
+  .object({
+    productId: uuid,
+  })
+  .strict();
+
+export const reviewKeywordSchema = z
+  .object({
+    keywordId: uuid,
+    decision: z.enum(['approve', 'reject']),
+  })
+  .strict();
+
 export type CreateKeywordInput = z.infer<typeof createKeywordSchema>;
 export type GenerateArticleInput = z.infer<typeof generateArticleSchema>;
+export type GenerateKeywordsInput = z.infer<typeof generateKeywordsSchema>;
+export type ReviewKeywordInput = z.infer<typeof reviewKeywordSchema>;
