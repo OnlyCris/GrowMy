@@ -14,6 +14,7 @@ export * from './articles/slug';
  * le righe dal database e passa qui i dati già pronti.
  */
 export * from './planner/ctr-curve';
+export * from './planner/ctr-gap';
 export * from './planner/striking-distance';
 export * from './planner/cannibalization';
 export * from './planner/refresh';

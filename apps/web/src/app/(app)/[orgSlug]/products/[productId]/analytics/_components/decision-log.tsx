@@ -28,6 +28,7 @@ const DECISION_LABEL: Record<string, string> = {
   promote: 'Priorità aumentata',
   demote: 'Priorità ridotta',
   schedule_refresh: 'Aggiornamento consigliato',
+  rewrite_snippet: 'Titolo e descrizione da rivedere',
   flag_cannibalization: 'Conflitto segnalato',
   archive: 'Archiviata',
 };
@@ -40,6 +41,9 @@ const EVIDENCE_LABEL: Record<string, string> = {
   clicks: 'Clic',
   position: 'Posizione media',
   estimatedClickGain: 'Clic stimati in più',
+  actualCtr: 'CTR reale (%)',
+  expectedCtr: 'CTR atteso (%)',
+  missedClicks: 'Clic mancati',
   previousClicks: 'Clic periodo prec.',
   currentClicks: 'Clic periodo corr.',
   clicksChange: 'Variazione clic',

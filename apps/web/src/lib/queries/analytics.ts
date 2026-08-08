@@ -10,10 +10,12 @@ import {
   products,
 } from '@growmy/db';
 import {
+  findCtrGaps,
   findStrikingDistanceOpportunities,
+  type CtrGapIssue,
   type StrikingDistanceOpportunity,
 } from '@growmy/core';
-import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 
 /**
  * QUERY DELLE ANALITICHE.
@@ -323,6 +325,172 @@ export async function getStrikingDistanceOpportunities(
     .limit(limit * 5);
 
   return findStrikingDistanceOpportunities(rows, { limit });
+}
+
+// ---------------------------------------------------------------------------
+// Scarto CTR
+// ---------------------------------------------------------------------------
+
+/**
+ * Pagine visibili in prima pagina che rendono meno di quanto la posizione
+ * prometta. Stessa divisione di responsabilità dello striking distance:
+ * l'aggregazione in SQL, la diagnosi in `@growmy/core`.
+ *
+ * L'HAVING filtra a `position <= 10` e a un volume minimo perché sotto quelle
+ * soglie il CTR è una frazione con denominatore troppo piccolo per dire
+ * qualcosa — e perché evita di trascinare in memoria righe che la logica
+ * scarterebbe comunque.
+ */
+export async function getCtrGapIssues(
+  productId: string,
+  limit = 15,
+  windowDays: number = ANALYTICS_WINDOW_DAYS,
+): Promise<CtrGapIssue[]> {
+  const weightedPosition = sql<number>`(sum(${gscDailyMetrics.position} * ${gscDailyMetrics.impressions}) / nullif(sum(${gscDailyMetrics.impressions}), 0))`;
+
+  const rows = await db
+    .select({
+      query: gscDailyMetrics.query,
+      page: gscDailyMetrics.page,
+      articleId: sql<string | null>`max(${gscDailyMetrics.articleId}::text)`,
+      clicks: sql<number>`sum(${gscDailyMetrics.clicks})::int`,
+      impressions: sql<number>`sum(${gscDailyMetrics.impressions})::int`,
+      position: sql<number>`${weightedPosition}::float`,
+    })
+    .from(gscDailyMetrics)
+    .where(
+      and(
+        eq(gscDailyMetrics.productId, productId),
+        gte(gscDailyMetrics.date, isoDaysAgo(windowDays)),
+      ),
+    )
+    .groupBy(gscDailyMetrics.query, gscDailyMetrics.page)
+    .having(
+      sql`${weightedPosition} <= 10 and sum(${gscDailyMetrics.impressions}) >= 100`,
+    )
+    .orderBy(desc(sql`sum(${gscDailyMetrics.impressions})`))
+    .limit(limit * 5);
+
+  return findCtrGaps(rows, { limit });
+}
+
+// ---------------------------------------------------------------------------
+// Segmentazioni già a database
+// ---------------------------------------------------------------------------
+
+export interface SegmentRow {
+  /** Codice ISO-3 per il paese, `MOBILE`/`DESKTOP`/`TABLET` per il dispositivo. */
+  key: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
+/**
+ * Aggregazione su una singola dimensione già presente in `gsc_daily_metrics`.
+ *
+ * `country` e `device` venivano importati fin dal primo sync e non erano mai
+ * stati mostrati da nessuna parte: questi due breakdown non costano una
+ * chiamata in più all'API di Google, solo una GROUP BY su dati che avevamo già.
+ */
+async function getSegment(
+  productId: string,
+  column: typeof gscDailyMetrics.country | typeof gscDailyMetrics.device,
+  limit: number,
+  windowDays: number,
+): Promise<SegmentRow[]> {
+  const rows = await db
+    .select({
+      key: column,
+      clicks: sql<number>`sum(${gscDailyMetrics.clicks})::int`,
+      impressions: sql<number>`sum(${gscDailyMetrics.impressions})::int`,
+      positionWeighted: sql<number>`sum(${gscDailyMetrics.position} * ${gscDailyMetrics.impressions})::float`,
+    })
+    .from(gscDailyMetrics)
+    .where(
+      and(
+        eq(gscDailyMetrics.productId, productId),
+        gte(gscDailyMetrics.date, isoDaysAgo(windowDays)),
+        isNotNull(column),
+      ),
+    )
+    .groupBy(column)
+    .orderBy(desc(sql`sum(${gscDailyMetrics.clicks})`))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    key: r.key ?? '—',
+    clicks: r.clicks,
+    impressions: r.impressions,
+    ctr: r.impressions > 0 ? r.clicks / r.impressions : 0,
+    position: r.impressions > 0 ? r.positionWeighted / r.impressions : 0,
+  }));
+}
+
+export function getCountryBreakdown(
+  productId: string,
+  limit = 8,
+  windowDays: number = ANALYTICS_WINDOW_DAYS,
+): Promise<SegmentRow[]> {
+  return getSegment(productId, gscDailyMetrics.country, limit, windowDays);
+}
+
+export function getDeviceBreakdown(
+  productId: string,
+  windowDays: number = ANALYTICS_WINDOW_DAYS,
+): Promise<SegmentRow[]> {
+  // Tre valori possibili: non serve un limite.
+  return getSegment(productId, gscDailyMetrics.device, 10, windowDays);
+}
+
+// ---------------------------------------------------------------------------
+// Andamento giornaliero
+// ---------------------------------------------------------------------------
+
+export interface DailyPoint {
+  date: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+}
+
+/**
+ * Serie giornaliera per il grafico dell'andamento.
+ *
+ * I giorni senza righe restano ASSENTI invece di comparire a zero: un buco nel
+ * grafico dice "non abbiamo dati per quel giorno", uno zero dice "quel giorno
+ * non ha portato traffico". Sono cose diverse, e confonderle è il modo più
+ * rapido per far sembrare un ritardo di sincronizzazione un crollo di
+ * posizionamento. Il componente del grafico interrompe la linea sui buchi.
+ */
+export async function getDailySeries(
+  productId: string,
+  windowDays: number = ANALYTICS_WINDOW_DAYS,
+): Promise<DailyPoint[]> {
+  const rows = await db
+    .select({
+      date: gscDailyMetrics.date,
+      clicks: sql<number>`sum(${gscDailyMetrics.clicks})::int`,
+      impressions: sql<number>`sum(${gscDailyMetrics.impressions})::int`,
+      positionWeighted: sql<number>`sum(${gscDailyMetrics.position} * ${gscDailyMetrics.impressions})::float`,
+    })
+    .from(gscDailyMetrics)
+    .where(
+      and(
+        eq(gscDailyMetrics.productId, productId),
+        gte(gscDailyMetrics.date, isoDaysAgo(windowDays)),
+      ),
+    )
+    .groupBy(gscDailyMetrics.date)
+    .orderBy(gscDailyMetrics.date);
+
+  return rows.map((r) => ({
+    date: r.date,
+    clicks: r.clicks,
+    impressions: r.impressions,
+    position: r.impressions > 0 ? r.positionWeighted / r.impressions : 0,
+  }));
 }
 
 // ---------------------------------------------------------------------------

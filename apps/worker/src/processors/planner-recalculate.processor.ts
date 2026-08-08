@@ -1,5 +1,6 @@
 import {
   detectCannibalization,
+  findCtrGaps,
   findRefreshCandidates,
   findStrikingDistanceOpportunities,
   type AggregatedQueryMetrics,
@@ -299,6 +300,40 @@ export async function processPlannerRecalculate(
     });
   }
 
+  /**
+   * --- 2b. Visibili ma non cliccate ----------------------------------------
+   *
+   * Diagnosi opposta allo striking distance sugli stessi dati: là la posizione
+   * è da conquistare, qui è già stata conquistata e resa male. Finisce nel
+   * registro come `rewrite_snippet` perché l'intervento è su titolo e meta
+   * description, non sul contenuto — mandarla nella coda editoriale insieme
+   * alle altre farebbe riscrivere articoli che funzionano.
+   */
+  const ctrGaps = findCtrGaps(queryMetrics, { limit: 10 });
+
+  for (const gap of ctrGaps) {
+    decisions.push({
+      organizationId: job.organizationId,
+      productId,
+      runId,
+      articleId: gap.articleId,
+      decision: 'rewrite_snippet',
+      priorityAfter: gap.score.toFixed(2),
+      rationale: gap.rationale,
+      evidence: {
+        query: gap.query,
+        page: gap.page,
+        impressions: gap.impressions,
+        clicks: gap.clicks,
+        position: Number(gap.position.toFixed(2)),
+        actualCtr: Number((gap.actualCtr * 100).toFixed(2)),
+        expectedCtr: Number((gap.expectedCtr * 100).toFixed(2)),
+        missedClicks: gap.missedClicks,
+        windowDays: WINDOW_DAYS,
+      },
+    });
+  }
+
   // --- 3. Articoli in calo -------------------------------------------------
   const currentStart = isoDaysAgo(WINDOW_DAYS);
   const previousStart = isoDaysAgo(WINDOW_DAYS * 2);
@@ -345,11 +380,13 @@ export async function processPlannerRecalculate(
     step: 'planner.done',
     message:
       `Ricalcolo completato: ${keywordsCreated} nuove keyword proposte, ` +
-      `${conflictsRecorded} conflitti segnalati, ${refreshCandidates.length} articoli da aggiornare.`,
+      `${conflictsRecorded} conflitti segnalati, ${ctrGaps.length} snippet da rivedere, ` +
+      `${refreshCandidates.length} articoli da aggiornare.`,
     details: {
       runId,
       keywordsCreated,
       conflictsRecorded,
+      ctrGaps: ctrGaps.length,
       refreshCandidates: refreshCandidates.length,
       opportunitiesAnalysed: opportunities.length,
       mode: payload.mode ?? 'scheduled',

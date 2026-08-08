@@ -7,6 +7,10 @@ import { readPendingGscConnection } from '@/lib/gsc-oauth';
 import {
   ANALYTICS_WINDOW_DAYS,
   getAnalyticsSummary,
+  getCountryBreakdown,
+  getCtrGapIssues,
+  getDailySeries,
+  getDeviceBreakdown,
   getGscConnection,
   getOpenCannibalizationIssues,
   getPlannerDecisions,
@@ -16,10 +20,13 @@ import {
 } from '@/lib/queries/analytics';
 
 import { CannibalizationPanel } from './_components/cannibalization-panel';
+import { CtrGapPanel } from './_components/ctr-gap-panel';
 import { DecisionLog } from './_components/decision-log';
 import { GscConnectionPanel } from './_components/gsc-connection-panel';
 import { MetricsOverview } from './_components/metrics-overview';
+import { SegmentBreakdown } from './_components/segment-breakdown';
 import { StrikingDistancePanel } from './_components/striking-distance-panel';
+import { TrendChart } from './_components/trend-chart';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,17 +94,31 @@ export default async function ProductAnalyticsPage({
     );
   }
 
-  const [summary, opportunities, cannibalization, decisions, topQueries, topPages] =
-    await withUserContext(membership.userId, () =>
-      Promise.all([
-        getAnalyticsSummary(productId),
-        getStrikingDistanceOpportunities(productId),
-        getOpenCannibalizationIssues(productId),
-        getPlannerDecisions(productId),
-        getTopQueries(productId),
-        getTopPages(productId),
-      ]),
-    );
+  const [
+    summary,
+    opportunities,
+    ctrGaps,
+    cannibalization,
+    decisions,
+    topQueries,
+    topPages,
+    dailySeries,
+    countries,
+    devices,
+  ] = await withUserContext(membership.userId, () =>
+    Promise.all([
+      getAnalyticsSummary(productId),
+      getStrikingDistanceOpportunities(productId),
+      getCtrGapIssues(productId),
+      getOpenCannibalizationIssues(productId),
+      getPlannerDecisions(productId),
+      getTopQueries(productId),
+      getTopPages(productId),
+      getDailySeries(productId),
+      getCountryBreakdown(productId),
+      getDeviceBreakdown(productId),
+    ]),
+  );
 
   const hasData = summary.daysWithData > 0;
 
@@ -124,6 +145,8 @@ export default async function ProductAnalyticsPage({
             windowDays={ANALYTICS_WINDOW_DAYS}
           />
 
+          <TrendChart points={dailySeries} />
+
           <StrikingDistancePanel
             productId={productId}
             opportunities={opportunities.map((o) => ({
@@ -134,6 +157,23 @@ export default async function ProductAnalyticsPage({
               position: o.position,
               estimatedClickGain: o.estimatedClickGain,
               rationale: o.rationale,
+            }))}
+          />
+
+          <CtrGapPanel
+            orgSlug={orgSlug}
+            productId={productId}
+            issues={ctrGaps.map((row) => ({
+              query: row.query,
+              page: row.page,
+              articleId: row.articleId,
+              clicks: row.clicks,
+              impressions: row.impressions,
+              position: row.position,
+              expectedCtr: row.expectedCtr,
+              actualCtr: row.actualCtr,
+              missedClicks: row.missedClicks,
+              rationale: row.rationale,
             }))}
           />
 
@@ -193,6 +233,8 @@ export default async function ProductAnalyticsPage({
               </ul>
             </div>
           </section>
+
+          <SegmentBreakdown countries={countries} devices={devices} />
 
           <DecisionLog decisions={decisions} />
         </>
