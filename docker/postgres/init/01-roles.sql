@@ -85,6 +85,14 @@ ALTER ROLE app_migrator NOCREATEDB NOCREATEROLE NOSUPERUSER BYPASSRLS;
 GRANT CONNECT ON DATABASE growmy TO app_migrator;
 GRANT ALL ON SCHEMA public TO app_migrator;
 
+-- CREATE sul DATABASE, non solo sullo schema `public`: `drizzle-kit migrate`
+-- tiene lo storico in `drizzle.__drizzle_migrations` e alla prima esecuzione
+-- deve poter fare `CREATE SCHEMA drizzle`, che richiede questo privilegio a
+-- livello di database. Senza, l'unico messaggio è
+-- `permission denied for database growmy` — che manda a cercare il problema
+-- nella connessione invece che in una GRANT mancante.
+GRANT CREATE ON DATABASE growmy TO app_migrator;
+
 -- ---------------------------------------------------------------------------
 -- Privilegi di default sugli oggetti FUTURI
 --

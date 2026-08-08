@@ -303,8 +303,13 @@ step "Migrazioni del database"
 # (prima si smette di usare la colonna, poi la si rimuove) e non possono
 # passare da uno script automatico.
 MIGRATION_DIR="packages/db/migrations"
+NEW_MIGRATIONS=""
+
 if [[ -d "$MIGRATION_DIR" ]]; then
-  NEW_MIGRATIONS="$(git diff --name-only "${PREVIOUS_SHA}" "${TARGET_SHA}" -- "$MIGRATION_DIR" || true)"
+  # Solo i file `.sql`: `meta/_journal.json` e gli snapshot cambiano a ogni
+  # `drizzle-kit generate` anche quando lo schema resta identico, e farebbero
+  # risultare "nuove migrazioni" dove non ce ne sono.
+  NEW_MIGRATIONS="$(git diff --name-only "${PREVIOUS_SHA}" "${TARGET_SHA}" -- "${MIGRATION_DIR}/*.sql" || true)"
 
   if [[ -n "$NEW_MIGRATIONS" ]]; then
     log "Nuove migrazioni rilevate"
@@ -341,12 +346,21 @@ fi
 # quella del lockfile. Un deploy non deve dipendere dalla raggiungibilità del
 # registry npm, e una migrazione non deve girare con un drizzle-kit che nessuno
 # ha testato. Se il binario manca, questo fallisce dicendo esattamente quello.
-log "Applicazione delle migrazioni"
-compose run --rm --no-deps -w /app/packages/db \
-  -e DATABASE_MIGRATION_URL="postgres://app_migrator:${POSTGRES_MIGRATOR_PASSWORD:-$POSTGRES_PASSWORD}@postgres:5432/growmy" \
-  worker ./node_modules/.bin/drizzle-kit migrate --config=drizzle.config.ts
+if [[ -z "$NEW_MIGRATIONS" ]]; then
+  # Nessun file di migrazione cambiato fra le due revisioni: non c'è nulla da
+  # applicare. Prima si invocava `drizzle-kit migrate` comunque, a ogni deploy,
+  # ed è così che un passo che non ha MAI funzionato è rimasto invisibile per
+  # mesi — falliva identico anche quando non aveva niente da fare, e nessuno
+  # collegava il rollback a una migrazione che non esisteva.
+  ok "Nessuna nuova migrazione: passo saltato"
+else
+  log "Applicazione delle migrazioni"
+  compose run --rm --no-deps -w /app/packages/db \
+    -e DATABASE_MIGRATION_URL="postgres://app_migrator:${POSTGRES_MIGRATOR_PASSWORD:-$POSTGRES_PASSWORD}@postgres:5432/growmy" \
+    worker ./node_modules/.bin/drizzle-kit migrate --config=drizzle.config.ts
 
-ok "Migrazioni applicate"
+  ok "Migrazioni applicate"
+fi
 
 # Partizioni future di gsc_daily_metrics: se mancano, gli inserimenti falliscono
 # il primo giorno del mese nuovo.
