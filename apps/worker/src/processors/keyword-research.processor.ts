@@ -13,6 +13,7 @@ import {
 } from '@growmy/db';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
+import { loadGscOpportunities } from '../lib/gsc-insights';
 import type { ProcessorContext } from './types';
 
 /**
@@ -133,15 +134,30 @@ export async function processKeywordResearch(ctx: ProcessorContext): Promise<voi
         .where(and(eq(keywords.productId, productId), isNull(keywords.deletedAt))),
   );
 
+  /**
+   * Opportunità reali da Search Console, se il prodotto ha una property
+   * collegata. Vuote altrimenti: il prompt resta valido e la ricerca funziona
+   * come prima — nessun prodotto è obbligato a collegare GSC per generare
+   * keyword.
+   */
+  const gscOpportunities = await recorder.step(
+    'keyword_research.gsc',
+    'Lettura delle ricerche reali da Search Console',
+    () => loadGscOpportunities(productId),
+  );
+
   const result = await recorder.step(
     'keyword_research.propose',
-    `Ricerca di ${count} keyword pertinenti, organizzate per cluster`,
+    gscOpportunities.length > 0
+      ? `Ricerca di ${count} keyword, orientata su ${gscOpportunities.length} ricerche reali del sito`
+      : `Ricerca di ${count} keyword pertinenti, organizzate per cluster`,
     async () =>
       llm.complete({
         messages: keywordResearchPrompt({
           brand,
           count,
           existingKeywords: existing.map((k) => k.term),
+          gscOpportunities,
         }),
         jsonMode: true,
         temperature: 0.8,

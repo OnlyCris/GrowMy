@@ -16,6 +16,7 @@ import {
 
 export * from './adapter';
 export * from './crypto';
+export * from './gsc';
 export * from './ssrf-guard';
 export * from './providers/wordpress';
 export * from './providers/ghost';

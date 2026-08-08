@@ -1,5 +1,4 @@
-import { env } from '@growmy/env';
-import { Redis } from 'ioredis';
+import { getRedis } from './redis';
 
 /**
  * RATE LIMITING — finestra scorrevole su Redis.
@@ -16,17 +15,6 @@ import { Redis } from 'ioredis';
  * L'intera sequenza è uno script Lua: Redis lo esegue atomicamente, quindi
  * richieste concorrenti non possono superare il limite insieme.
  */
-
-const globalForRedis = globalThis as unknown as { __growmyRedis?: Redis };
-
-function getRedis(): Redis {
-  globalForRedis.__growmyRedis ??= new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: 2,
-    enableOfflineQueue: false,
-    lazyConnect: false,
-  });
-  return globalForRedis.__growmyRedis;
-}
 
 /**
  * KEYS[1] = chiave del sorted set
@@ -86,7 +74,15 @@ export const RATE_LIMITS = {
   'articles.generate': { limit: 10, windowMs: 3_600_000 },
   'articles.manage': { limit: 30, windowMs: 3_600_000 },
   'integration.connect': { limit: 10, windowMs: 3_600_000 },
+  'gsc.connect': { limit: 10, windowMs: 3_600_000 },
+  /**
+   * Una sincronizzazione manuale interroga l'API di Google, che ha una quota
+   * giornaliera per progetto condivisa da TUTTI i clienti della piattaforma:
+   * il limite qui protegge quella quota comune, non il nostro database.
+   */
+  'gsc.sync': { limit: 4, windowMs: 3_600_000 },
   'planner.run': { limit: 2, windowMs: 3_600_000 },
+  'planner.resolve': { limit: 30, windowMs: 60_000 },
   'api.default': { limit: 120, windowMs: 60_000 },
 } as const;
 

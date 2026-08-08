@@ -7,3 +7,13 @@ export * from './articles/state-machine';
 export * from './articles/quality-score';
 export * from './articles/internal-links';
 export * from './articles/slug';
+
+/**
+ * Closed-loop planner (UPGRADE #2): trasforma le metriche di Search Console in
+ * decisioni editoriali motivate. Funzioni pure, senza I/O — il worker aggrega
+ * le righe dal database e passa qui i dati già pronti.
+ */
+export * from './planner/ctr-curve';
+export * from './planner/striking-distance';
+export * from './planner/cannibalization';
+export * from './planner/refresh';

@@ -16,6 +16,7 @@ import {
 import { processArticleGenerate } from './processors/article-generate.processor';
 import { processArticlePublish } from './processors/article-publish.processor';
 import { processArticleResearch } from './processors/article-research.processor';
+import { processGscSync, processGscSyncCron } from './processors/gsc-sync.processor';
 import { processIntegrationConnect } from './processors/integration-connect.processor';
 import { processIntegrationHealth } from './processors/integration-health.processor';
 import { processKeywordResearch } from './processors/keyword-research.processor';
@@ -24,6 +25,10 @@ import {
   processDailyDispatch,
   processStuckJobRecovery,
 } from './processors/maintenance.processor';
+import {
+  processPlannerRecalculate,
+  processPlannerRecalculateCron,
+} from './processors/planner-recalculate.processor';
 import type { EnqueueRequest, Processor, ProcessorContext } from './processors/types';
 import {
   createQueueRegistry,
@@ -128,14 +133,26 @@ const PROCESSORS: Record<string, Processor> = {
   article_publish: processArticlePublish,
   integration_health_check: processIntegrationHealth,
   integration_connect: processIntegrationConnect,
+  gsc_sync: processGscSync,
+  planner_recalculate: processPlannerRecalculate,
 };
 
-/** Cron senza una riga in `jobs`: girano fuori dal ciclo di vita normale. */
+/**
+ * Cron senza una riga in `jobs`: girano fuori dal ciclo di vita normale.
+ *
+ * `gsc-sync` e `planner-recalculate` puntano alla variante `*Cron`, non al
+ * processore vero: quelle funzioni non elaborano nulla, si limitano ad
+ * accodare un job per ogni prodotto collegato. La distinzione conta — il
+ * processore vero pretende un `productId` sul record del job, che un cron non
+ * ha, e il contesto sintetico dei cron non ne fornisce uno.
+ */
 const CRON_PROCESSORS: Record<string, Processor> = {
   'daily-content-dispatch': processDailyDispatch,
   'approval-timeout-sweep': processApprovalTimeoutSweep,
   'stuck-job-recovery': processStuckJobRecovery,
   'integration-health-check': processIntegrationHealth,
+  'gsc-sync': processGscSyncCron,
+  'planner-recalculate': processPlannerRecalculateCron,
 };
 
 /**

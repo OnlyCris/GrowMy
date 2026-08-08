@@ -19,6 +19,7 @@ export function ProductTabs({
     { href: `${base}/settings`, label: 'Impostazioni' },
     { href: `${base}/keywords`, label: 'Keyword' },
     { href: `${base}/articles`, label: 'Articoli' },
+    { href: `${base}/analytics`, label: 'Analitiche' },
     { href: `${base}/integration`, label: 'Integrazione' },
   ];
 

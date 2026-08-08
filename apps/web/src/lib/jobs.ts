@@ -45,7 +45,9 @@ export interface EnqueueJobParams {
     | 'article_research'
     | 'article_generate'
     | 'article_publish'
-    | 'integration_connect';
+    | 'integration_connect'
+    | 'gsc_sync'
+    | 'planner_recalculate';
   targetType: string;
   targetId: string;
   payload: Record<string, unknown>;

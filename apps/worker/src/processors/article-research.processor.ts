@@ -10,6 +10,10 @@ import {
 } from '@growmy/db';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
+import {
+  loadGscInsightsForKeyword,
+  loadGscInsightsForPage,
+} from '../lib/gsc-insights';
 import type { ProcessorContext } from './types';
 
 /**
@@ -46,6 +50,9 @@ export async function processArticleResearch(
     .select({
       articleId: articles.id,
       articleStatus: articles.status,
+      // Serve solo al caso rigenerazione: se l'articolo è già stato pubblicato
+      // una volta, Search Console ha dati sulla sua pagina.
+      articlePublishedUrl: articles.publishedUrl,
       keywordTerm: keywords.term,
       keywordIsPillar: keywords.isPillar,
       clusterId: keywords.clusterId,
@@ -192,10 +199,36 @@ export async function processArticleResearch(
     },
   );
 
+  /**
+   * --- Dati reali di Search Console (UPGRADE #2, lato generazione) ---------
+   *
+   * Il resto del brief è costruito su ciò che il modello immagina cerchi il
+   * lettore. Queste righe sono l'unica parte che glielo dice: ricerche che
+   * hanno davvero portato questo sito in SERP nelle ultime quattro settimane.
+   *
+   * Entrambe vuote quando il prodotto non ha Search Console collegata, ed è la
+   * condizione normale per la maggior parte dei prodotti: il brief si genera
+   * esattamente come prima, solo con meno contesto. Nessuna generazione può
+   * fallire per la mancanza di questi dati.
+   */
+  const [gscInsights, gscPageInsights] = await recorder.step(
+    'research.gsc',
+    'Lettura delle ricerche reali da Search Console',
+    async () =>
+      Promise.all([
+        loadGscInsightsForKeyword(row.productId, row.keywordTerm!),
+        row.articlePublishedUrl
+          ? loadGscInsightsForPage(row.productId, row.articlePublishedUrl)
+          : Promise.resolve([]),
+      ]),
+  );
+
   // --- Generazione del brief ----------------------------------------------
   const result = await recorder.step(
     'research.brief',
-    `Progettazione della struttura per «${row.keywordTerm}»`,
+    gscInsights.length > 0
+      ? `Progettazione della struttura per «${row.keywordTerm}», su ${gscInsights.length} ricerche reali`
+      : `Progettazione della struttura per «${row.keywordTerm}»`,
     async () =>
       llm.complete({
         messages: briefPrompt({
@@ -213,6 +246,8 @@ export async function processArticleResearch(
           clusterName,
           pillarArticle,
           humanFeedback: payload.humanFeedback,
+          gscInsights,
+          gscPageInsights,
         }),
         jsonMode: true,
         temperature: 0.8,

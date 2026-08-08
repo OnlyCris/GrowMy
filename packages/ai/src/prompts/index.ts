@@ -37,6 +37,48 @@ export function untrustedBlock(label: string, content: string): string {
   return `${marker}\n${content}\n${marker}`;
 }
 
+/**
+ * Una ricerca reale su cui il sito ha già visibilità, da Search Console.
+ *
+ * PERCHÉ QUESTO TIPO ESISTE. Tutto il resto di questo file chiede al modello di
+ * *immaginare* cosa cerca il lettore. Queste righe sono l'unica cosa che glielo
+ * *dice*: sono ricerche che hanno davvero portato il sito in SERP, con i numeri
+ * che lo dimostrano. Un brief costruito anche su questi dati copre domande che
+ * esistono, non domande plausibili — ed è la differenza fra un contenuto
+ * generato e un contenuto informato.
+ */
+export interface GscQueryInsight {
+  query: string;
+  impressions: number;
+  clicks: number;
+  /** Posizione media. Sopra la decima significa "visibile ma non scelto". */
+  position: number;
+}
+
+/**
+ * Blocco dei dati Search Console per i prompt.
+ *
+ * I dati NON sono testo scritto da terzi: vengono dall'API di Google e passano
+ * per il nostro database. Non richiedono quindi `untrustedBlock` per la
+ * prompt injection — ma le *stringhe delle query* sì: sono digitate da utenti
+ * anonimi e finiscono in `gsc_daily_metrics` senza filtro. Una ricerca del tipo
+ * "ignora le istruzioni precedenti" è improbabile ma costa zero difendersene,
+ * e su una piattaforma che genera contenuti in automatico il costo di sbagliare
+ * è un articolo pubblicato con contenuto dirottato.
+ */
+function gscInsightsBlock(insights: GscQueryInsight[], intro: string): string {
+  if (insights.length === 0) return '';
+
+  const lines = insights
+    .map(
+      (row) =>
+        `${row.query} — ${row.impressions} impression, ${row.clicks} clic, posizione media ${row.position.toFixed(1)}`,
+    )
+    .join('\n');
+
+  return `${intro}\n${untrustedBlock('dati_search_console', lines)}`;
+}
+
 function brandBlock(brand: BrandContext): string {
   const lines = [
     `Sito: ${brand.productName} (${brand.domain})`,
@@ -95,6 +137,12 @@ export function keywordResearchPrompt(params: {
   brand: BrandContext;
   count: number;
   existingKeywords: string[];
+  /**
+   * Ricerche su cui il sito è già visibile ma non premiato (posizione 8-20),
+   * da Search Console. Cambiano la natura della ricerca keyword: da esercizio
+   * di immaginazione a estensione di ciò che già funziona.
+   */
+  gscOpportunities?: GscQueryInsight[];
 }): ChatMessage[] {
   return [
     {
@@ -123,6 +171,21 @@ Criteri per ogni keyword, pillar o di supporto:
 - Ognuna deve poter sostenere un articolo di almeno 1200 parole senza riempitivi.
 - Le keyword di supporto devono essere long-tail, non termini generici ad
   altissima concorrenza — il pillar può essere più ampio, le altre no.
+
+${gscInsightsBlock(
+  params.gscOpportunities ?? [],
+  `DATI REALI DI SEARCH CONSOLE — ricerche su cui questo sito compare già fra
+l'ottava e la ventesima posizione.
+Sono la prova che Google considera il sito pertinente su questi temi. Usale per
+orientare i cluster:
+- Costruisci almeno un cluster attorno agli argomenti che emergono qui, se sono
+  coerenti con l'attività. Un tema già validato dai dati batte un tema plausibile.
+- Proponi long-tail ADIACENTI a queste ricerche, non le ricerche stesse: quelle
+  sono già coperte da una pagina esistente, e rifarle produrrebbe due pagine in
+  competizione fra loro invece di un cluster.
+- Se un'area ha molte impression e nessun clic, è una domanda posta spesso a cui
+  il sito risponde male: è lì che un articolo nuovo ha più margine.`,
+)}
 
 ${
   params.existingKeywords.length > 0
@@ -207,6 +270,18 @@ export function briefPrompt(params: {
   pillarArticle?: LinkableArticle | null;
   /** Feedback umano su un brief precedente rifiutato. */
   humanFeedback?: string | null;
+  /**
+   * Ricerche reali correlate alla keyword, da Search Console. Vuoto finché il
+   * prodotto non ha una property collegata: il prompt resta valido senza.
+   */
+  gscInsights?: GscQueryInsight[];
+  /**
+   * Ricerche su cui la pagina di QUESTO articolo ha già impression. Presente
+   * solo quando si rigenera o aggiorna un contenuto già pubblicato — è il caso
+   * in cui il dato vale di più, perché dice cosa la pagina già intercetta e
+   * dove sta perdendo.
+   */
+  gscPageInsights?: GscQueryInsight[];
 }): ChatMessage[] {
   return [
     {
@@ -243,6 +318,30 @@ ${
       )}`
     : ''
 }
+
+${gscInsightsBlock(
+  params.gscInsights ?? [],
+  `DATI REALI DI SEARCH CONSOLE — ricerche correlate su cui questo sito compare già.
+Non sono stime: sono ricerche che hanno portato il sito in SERP nelle ultime settimane.
+Usale come vincolo sulla struttura, non come elenco da citare:
+- Le sezioni devono coprire le domande che stanno DIETRO queste ricerche, con le
+  parole che le persone usano davvero — non i sinonimi che sceglieresti tu.
+- Una ricerca con molte impression e posizione peggiore della decima segnala una
+  domanda posta spesso a cui il sito risponde male: merita una sezione dedicata,
+  non un accenno.
+- Inseriscine le più pertinenti fra le "secondaryKeywords".
+- Ignora quelle che non c'entrano con la keyword target: la vicinanza è statistica,
+  non semantica, e forzarle produrrebbe un articolo che divaga.`,
+)}
+
+${gscInsightsBlock(
+  params.gscPageInsights ?? [],
+  `RICERCHE GIÀ INTERCETTATE DA QUESTA PAGINA.
+La pagina esiste già e riceve impression su questi termini. La struttura nuova deve
+CONSERVARE la copertura di ciò che funziona (le righe con clic) e rafforzare ciò che
+è visibile ma non scelto (molte impression, pochi clic): quelle sono domande dove
+comparire senza convincere, di solito perché la risposta è superficiale o sepolta.`,
+)}
 
 ${
   params.humanFeedback
