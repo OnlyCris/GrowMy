@@ -75,6 +75,26 @@ COPY --from=builder --chown=worker:nodejs /app/apps/worker/node_modules  ./apps/
 COPY --from=builder --chown=worker:nodejs /app/apps/worker/dist          ./apps/worker/dist
 COPY --from=builder --chown=worker:nodejs /app/apps/worker/package.json  ./apps/worker/package.json
 
+# --- Migrazioni del database -------------------------------------------------
+# `update.sh` le esegue DA QUI e non dal container `web`, malgrado il commento
+# opposto in `Dockerfile.web`: l'immagine web è un build standalone di Next, che
+# include solo i pacchetti tracciati come raggiungibili a runtime. `drizzle-kit`
+# e `drizzle-orm` non ci sono affatto — verificato ispezionando l'immagine —
+# quindi quel passo non poteva riuscire, con nessuna configurazione.
+#
+# Questa immagine invece copia l'intero `node_modules` della root, che contiene
+# lo store pnpm completo (`drizzle-kit`, `drizzle-orm` e le loro dipendenze).
+# Servono in più solo lo storico delle migrazioni, la configurazione e i
+# symlink di `packages/db` verso lo store.
+#
+# La configurazione arriva da `drizzle.config.prod.ts` ma prende il nome
+# `drizzle.config.ts`: quella di sviluppo apre con `import './src/load-env'`, e
+# i sorgenti di `packages/` non sono in questa immagine.
+COPY --from=builder --chown=worker:nodejs /app/packages/db/migrations             ./packages/db/migrations
+COPY --from=builder --chown=worker:nodejs /app/packages/db/node_modules           ./packages/db/node_modules
+COPY --from=builder --chown=worker:nodejs /app/packages/db/package.json           ./packages/db/package.json
+COPY --from=builder --chown=worker:nodejs /app/packages/db/drizzle.config.prod.ts ./packages/db/drizzle.config.ts
+
 # Directory di lavoro per gli asset temporanei (immagini generate prima
 # dell'upload su storage).
 RUN install -d -o worker -g nodejs /app/uploads

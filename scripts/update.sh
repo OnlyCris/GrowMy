@@ -20,6 +20,38 @@
 #
 set -Eeuo pipefail
 
+# -----------------------------------------------------------------------------
+# Ri-esecuzione da una copia
+# -----------------------------------------------------------------------------
+# Al passo 4 questo script fa `git checkout` del codice nuovo, e quel checkout
+# sostituisce anche QUESTO FILE mentre bash lo sta eseguendo. Bash però non
+# carica lo script in memoria tutto insieme: lo legge a blocchi dal descrittore
+# aperto, per offset di byte. Il risultato è che le righe non ancora lette
+# vengono prese dal file NUOVO a partire da un offset calcolato sul VECCHIO —
+# nel caso migliore si esegue la versione precedente di un comando, nel peggiore
+# si esegue testo troncato a metà.
+#
+# È già costato due deploy falliti: la correzione al comando di migrazione
+# risultava applicata all'immagine ma non allo script, perché quel blocco era
+# ancora quello della versione precedente.
+#
+# Copiandosi in /tmp e ri-eseguendosi da lì, il file in esecuzione non è più
+# quello che git sostituisce. La copia vive in una directory che `git checkout`
+# non tocca e viene rimossa all'uscita.
+if [[ "${GROWMY_UPDATE_REEXEC:-}" != "1" ]]; then
+  _self_copy="$(mktemp /tmp/growmy-update.XXXXXX)"
+  cat "$0" > "$_self_copy"
+  chmod +x "$_self_copy"
+  export GROWMY_UPDATE_REEXEC=1
+  export GROWMY_UPDATE_SELF_COPY="$_self_copy"
+  exec "$_self_copy" "$@"
+fi
+
+# Nella copia: rimuovila all'uscita, comunque vada.
+if [[ -n "${GROWMY_UPDATE_SELF_COPY:-}" ]]; then
+  trap 'rm -f "${GROWMY_UPDATE_SELF_COPY}"' EXIT
+fi
+
 APP_DIR="${APP_DIR:-/opt/growmy}"
 COMPOSE_FILE="${APP_DIR}/docker/docker-compose.yml"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/growmy}"
@@ -295,10 +327,24 @@ if [[ -d "$MIGRATION_DIR" ]]; then
   fi
 fi
 
+# Le migrazioni girano nel container WORKER, non nel web.
+#
+# L'immagine web è un build standalone di Next: contiene solo i pacchetti che
+# il tracing ha trovato raggiungibili a runtime. `drizzle-kit` e `drizzle-orm`
+# non ci sono, quindi questo passo falliva a ogni deploy e faceva scattare il
+# rollback — un difetto presente dal primo commit e mascherato dal fatto che
+# fallisce identico anche quando non ci sono migrazioni da applicare.
+# L'immagine worker ha invece lo store pnpm completo.
+#
+# Il binario è invocato per percorso, non tramite `npx`: `npx` senza una copia
+# locale la scarica dalla rete: silenziosamente, e a una versione diversa da
+# quella del lockfile. Un deploy non deve dipendere dalla raggiungibilità del
+# registry npm, e una migrazione non deve girare con un drizzle-kit che nessuno
+# ha testato. Se il binario manca, questo fallisce dicendo esattamente quello.
 log "Applicazione delle migrazioni"
-compose run --rm --no-deps \
-  -e DATABASE_URL="postgres://app_migrator:${POSTGRES_MIGRATOR_PASSWORD:-$POSTGRES_PASSWORD}@postgres:5432/growmy" \
-  web npx drizzle-kit migrate --config=packages/db/drizzle.config.ts
+compose run --rm --no-deps -w /app/packages/db \
+  -e DATABASE_MIGRATION_URL="postgres://app_migrator:${POSTGRES_MIGRATOR_PASSWORD:-$POSTGRES_PASSWORD}@postgres:5432/growmy" \
+  worker ./node_modules/.bin/drizzle-kit migrate --config=drizzle.config.ts
 
 ok "Migrazioni applicate"
 
