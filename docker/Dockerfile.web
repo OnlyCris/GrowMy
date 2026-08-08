@@ -102,8 +102,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone        
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static              ./apps/web/.next/static
 
 # Le migrazioni servono al container `web` perché update.sh le esegue da qui.
+#
+# `drizzle.config.prod.ts` e NON `drizzle.config.ts`: quest'ultimo apre con
+# `import './src/load-env'`, e `packages/db/src/` non è in questa immagine —
+# il build standalone di Next non include i sorgenti. Copiarlo qui produceva
+# `Cannot find module './src/load-env'` a ogni deploy, con rollback automatico
+# subito dopo. Vedi il commento esteso in `packages/db/drizzle.config.prod.ts`.
 COPY --from=builder --chown=nextjs:nodejs /app/packages/db/migrations             ./packages/db/migrations
-COPY --from=builder --chown=nextjs:nodejs /app/packages/db/drizzle.config.ts      ./packages/db/
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/drizzle.config.prod.ts ./packages/db/
 
 USER nextjs
 
