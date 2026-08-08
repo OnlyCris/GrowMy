@@ -96,9 +96,19 @@ gsc_connections ── gsc_daily_metrics ──┬── cannibalization_issues
                                        └── planner_decisions
 ```
 
-- `gsc_daily_metrics` è la tabella più voluminosa: partizionata per RANGE su `date`,
-  partizioni mensili create da `scripts/db/ensure-partitions.sh`. Le partizioni
-  oltre i 16 mesi vengono **staccate e archiviate, mai cancellate**.
+- `gsc_daily_metrics` è la tabella più voluminosa.
+
+  **NON è ancora partizionata**, malgrado quanto questo documento affermasse
+  prima: Drizzle l'ha creata come tabella normale, e `scripts/db/ensure-partitions.sh`
+  non esiste (`update.sh` lo invoca dietro un test `-x`, quindi lo salta in
+  silenzio). Il piano resta valido — partizioni mensili per RANGE su `date`,
+  distacco e archiviazione oltre i 16 mesi, mai cancellazione — ma va eseguito
+  prima che il volume lo renda urgente: convertire una tabella già grande in
+  partizionata richiede una finestra di manutenzione, farlo da vuota no.
+
+  Il sync scrive con `ON CONFLICT DO UPDATE` sull'indice unico
+  `(product_id, date, page, query, country, device)`: rifà gli ultimi tre giorni
+  a ogni esecuzione perché Google rivede i dati recenti dopo averli pubblicati.
 - Indice parziale su `position BETWEEN 8 AND 20`: è la query dello striking distance,
   eseguita settimanalmente su ogni prodotto.
 - `planner_decisions` è il cuore della trasparenza dell'**UPGRADE #2**: ogni
@@ -197,7 +207,14 @@ growmy/
 │   │   │   │   │       │       │       ├── page.tsx
 │   │   │   │   │       │       │       ├── versions/page.tsx
 │   │   │   │   │       │       │       └── activity/page.tsx   # ★ UPGRADE #3
-│   │   │   │   │       │       ├── analytics/page.tsx
+│   │   │   │   │       │       ├── analytics/           # ★ UPGRADE #2 — lato visibile
+│   │   │   │   │       │       │   ├── page.tsx
+│   │   │   │   │       │       │   └── _components/
+│   │   │   │   │       │       │       ├── gsc-connection-panel.tsx
+│   │   │   │   │       │       │       ├── metrics-overview.tsx
+│   │   │   │   │       │       │       ├── striking-distance-panel.tsx
+│   │   │   │   │       │       │       ├── cannibalization-panel.tsx
+│   │   │   │   │       │       │       └── decision-log.tsx
 │   │   │   │   │       │       ├── integrations/
 │   │   │   │   │       │       │   ├── page.tsx
 │   │   │   │   │       │       │   └── _components/health-status-card.tsx
@@ -245,7 +262,7 @@ growmy/
 │   │   │   │   ├── article.actions.ts
 │   │   │   │   ├── review.actions.ts
 │   │   │   │   ├── integration.actions.ts
-│   │   │   │   ├── gsc.actions.ts
+│   │   │   │   ├── analytics.actions.ts        # ★ GSC + planner
 │   │   │   │   └── billing.actions.ts
 │   │   │   │
 │   │   │   ├── components/
@@ -308,7 +325,7 @@ growmy/
 │   ├── core/                                   # Logica di dominio, zero I/O HTTP
 │   │   ├── src/
 │   │   │   ├── articles/{state-machine,quality-score,internal-linking}.ts
-│   │   │   ├── planner/{striking-distance,cannibalization,prioritizer,refresh}.ts
+│   │   │   ├── planner/{ctr-curve,striking-distance,cannibalization,refresh}.ts
 │   │   │   ├── credits/{ledger,reservations}.ts
 │   │   │   └── seo/{slug,meta,readability}.ts
 │   │   └── package.json
@@ -411,9 +428,11 @@ wrapper aggiunge un token double-submit per le azioni distruttive.
 | `connectIntegration` | admin | 10/h | Dry-run obbligatorio prima di salvare `healthy` |
 | `testIntegration` | admin | 20/h | |
 | `disconnectIntegration` | admin | 10/h | |
-| `connectGsc` / `disconnectGsc` | admin | 10/h | |
+| `confirmGscProperty` / `disconnectGsc` | admin | 10/h | Il token è cifrato dal worker, non qui |
+| `syncGscNow` | admin | 4/h per utente | Protegge la quota API Google, condivisa fra tutti i clienti |
 | `runPlannerNow` ★ | admin | 2/h per prodotto | UPGRADE #2 |
-| `resolveCannibalization` ★ | editor | 30/min | |
+| `resolveCannibalization` ★ | editor | 30/min | Registra l'esito, non esegue la correzione |
+| `promoteOpportunity` ★ | editor | 60/h | Striking distance → keyword `suggested` |
 | `createCheckoutSession` / `openBillingPortal` | owner | 10/h | Solo redirect Stripe |
 
 ### Route Handlers
