@@ -26,6 +26,14 @@ export async function getKeywordsForProduct(productId: string) {
       clusterId: keywords.clusterId,
       clusterName: keywordClusters.name,
       isPillar: keywords.isPillar,
+      // Servono a `assessCommercialValue`, che ricava stadio del funnel e
+      // potenziale in lettura invece di leggerli da una colonna: il punteggio
+      // resta allineato all'algoritmo corrente anche per le keyword vecchie.
+      searchIntent: keywords.searchIntent,
+      cpc: keywords.cpc,
+      searchVolume: keywords.searchVolume,
+      difficulty: keywords.difficulty,
+      priorityRationale: keywords.priorityRationale,
     })
     .from(keywords)
     .leftJoin(keywordClusters, eq(keywordClusters.id, keywords.clusterId))

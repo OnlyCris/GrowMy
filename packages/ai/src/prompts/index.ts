@@ -172,6 +172,26 @@ Criteri per ogni keyword, pillar o di supporto:
 - Le keyword di supporto devono essere long-tail, non termini generici ad
   altissima concorrenza — il pillar può essere più ampio, le altre no.
 
+VALUTAZIONE COMMERCIALE — la parte che conta di più.
+Per ogni keyword devi rispondere a una domanda precisa: **chi digita questa
+ricerca può plausibilmente diventare un cliente di QUESTA attività?**
+
+- Giudica rispetto a ciò che questa attività vende davvero, come descritto nel
+  contesto di brand qui sopra. Non rispetto al settore in generale: una ricerca
+  molto commerciale per qualcun altro può essere inutile per noi.
+- Almeno un terzo delle keyword proposte deve stare vicino alla decisione
+  d'acquisto (confronti, prezzi, "quale scegliere", casi d'uso concreti). Un
+  piano fatto solo di guide introduttive porta lettori e nessun cliente — è
+  l'errore più comune e il più costoso.
+- "estimatedCpc": quanto pagherebbe un inserzionista per un clic su questa
+  ricerca, in euro. È il modo più diretto per dire quanto la ricerca vale
+  commercialmente. Metti 0 se nessuno ci farebbe pubblicità sopra.
+- "commercialRationale": UNA frase su chi è la persona che fa questa ricerca e
+  quanto è vicina a comprare. Concreta, non generica.
+- Non gonfiare i punteggi: una guida introduttiva utile ha il suo posto nel
+  piano, ma va dichiarata per quello che è invece di essere presentata come
+  un'occasione di vendita.
+
 ${gscInsightsBlock(
   params.gscOpportunities ?? [],
   `DATI REALI DI SEARCH CONSOLE — ricerche su cui questo sito compare già fra
@@ -203,6 +223,8 @@ Formato:
         "searchIntent": "informational" | "commercial" | "transactional" | "navigational",
         "estimatedVolume": <intero, stima mensile>,
         "estimatedDifficulty": <0-100>,
+        "estimatedCpc": <numero, euro per clic; 0 se nessuno ci farebbe pubblicità>,
+        "commercialRationale": "chi fa questa ricerca e quanto è vicino a comprare",
         "rationale": "perché questo è il termine giusto da cui far partire il cluster"
       },
       "supportingKeywords": [
@@ -211,6 +233,8 @@ Formato:
           "searchIntent": "informational" | "commercial" | "transactional" | "navigational",
           "estimatedVolume": <intero, stima mensile>,
           "estimatedDifficulty": <0-100>,
+          "estimatedCpc": <numero, euro per clic; 0 se nessuno ci farebbe pubblicità>,
+          "commercialRationale": "chi fa questa ricerca e quanto è vicino a comprare",
           "rationale": "quale angolo specifico del pillar copre"
         }
       ]
@@ -226,6 +250,11 @@ interface KeywordProposal {
   searchIntent: string;
   estimatedVolume: number;
   estimatedDifficulty: number;
+  /** Euro per clic stimati. Proxy del valore commerciale: quanto il mercato
+   *  pubblicitario paga per intercettare questa ricerca. */
+  estimatedCpc?: number;
+  /** Chi fa questa ricerca e quanto è vicino a comprare. */
+  commercialRationale?: string;
   rationale: string;
 }
 

@@ -1,3 +1,4 @@
+import { assessCommercialValue } from '@growmy/core';
 import { withUserContext } from '@growmy/db/context';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
@@ -32,15 +33,30 @@ export default async function ProductKeywordsPage({
     <KeywordsPanel
       productId={productId}
       orgSlug={orgSlug}
-      initialKeywords={keywords.map((k) => ({
-        id: k.id,
-        term: k.term,
-        status: k.status,
-        priorityScore: k.priorityScore,
-        clusterId: k.clusterId,
-        clusterName: k.clusterName,
-        isPillar: k.isPillar,
-      }))}
+      initialKeywords={keywords.map((k) => {
+        // Il potenziale commerciale si calcola qui, sul server, da colonne già
+        // esistenti: non c'è una colonna da mantenere sincronizzata e le
+        // keyword create prima di questa funzione ricevono comunque il punteggio.
+        const commercial = assessCommercialValue({
+          term: k.term,
+          searchIntent: k.searchIntent,
+          cpc: k.cpc,
+        });
+
+        return {
+          id: k.id,
+          term: k.term,
+          status: k.status,
+          priorityScore: k.priorityScore,
+          clusterId: k.clusterId,
+          clusterName: k.clusterName,
+          isPillar: k.isPillar,
+          searchVolume: k.searchVolume,
+          rationale: k.priorityRationale,
+          commercialScore: commercial.score,
+          stage: commercial.stage,
+        };
+      })}
     />
   );
 }

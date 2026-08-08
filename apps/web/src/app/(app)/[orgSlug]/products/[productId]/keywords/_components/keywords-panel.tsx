@@ -1,5 +1,6 @@
 'use client';
 
+import { assessCommercialValue } from '@growmy/core';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
@@ -24,7 +25,41 @@ interface KeywordRow {
   clusterId: string | null;
   clusterName: string | null;
   isPillar: boolean;
+  searchVolume: number | null;
+  rationale: string | null;
+  /** 0-100. STIMA da intento e formulazione, non conversioni misurate. */
+  commercialScore: number;
+  stage: 'decision' | 'consideration' | 'awareness';
 }
+
+/**
+ * Etichette dello stadio del funnel.
+ *
+ * Il colore segue la vicinanza all'acquisto, non un giudizio di qualità: una
+ * keyword "informativa" non è una keyword scadente — serve a farsi trovare
+ * prima che il bisogno diventi acquisto. Per questo `awareness` è neutro e non
+ * rosso: rosso significherebbe "errore", e non lo è.
+ */
+const STAGE_META: Record<
+  KeywordRow['stage'],
+  { label: string; title: string; className: string }
+> = {
+  decision: {
+    label: 'Decisione',
+    title: 'Chi cerca sta valutando un acquisto concreto',
+    className: 'bg-success-100 text-success-700',
+  },
+  consideration: {
+    label: 'Valutazione',
+    title: 'Chi cerca sta confrontando opzioni',
+    className: 'bg-accent-100 text-accent-900',
+  },
+  awareness: {
+    label: 'Informativa',
+    title: 'Chi cerca si sta informando: la conversione è lontana',
+    className: 'bg-surface-muted text-foreground-muted',
+  },
+};
 
 export function KeywordsPanel({
   productId,
@@ -65,6 +100,11 @@ export function KeywordsPanel({
     startAdding(async () => {
       const result = await addKeywordAction({ productId, term });
       if (result.ok) {
+        // `assessCommercialValue` è una funzione pura senza I/O: gira anche qui
+        // nel browser, così una keyword aggiunta a mano mostra subito il suo
+        // stadio del funnel invece di restare neutra fino al primo ricaricamento.
+        const commercial = assessCommercialValue({ term: result.data.term });
+
         setKeywords((current) => [
           {
             id: result.data.id,
@@ -74,6 +114,10 @@ export function KeywordsPanel({
             clusterId: null,
             clusterName: null,
             isPillar: false,
+            searchVolume: null,
+            rationale: null,
+            commercialScore: commercial.score,
+            stage: commercial.stage,
           },
           ...current,
         ]);
@@ -205,17 +249,40 @@ export function KeywordsPanel({
                     Senza cluster
                   </li>
                 ) : null}
-                <li className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-foreground">{keyword.term}</span>
-                    {keyword.isPillar ? (
-                      <span className="rounded-[var(--radius-sm)] border border-border-strong bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">
-                        Pillar
+                <li className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-foreground">{keyword.term}</span>
+                      {keyword.isPillar ? (
+                        <span className="rounded-[var(--radius-sm)] border border-border-strong bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">
+                          Pillar
+                        </span>
+                      ) : null}
+                      <KeywordStatusBadge status={keyword.status} />
+                      <span
+                        title={STAGE_META[keyword.stage].title}
+                        className={`rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium ${STAGE_META[keyword.stage].className}`}
+                      >
+                        {STAGE_META[keyword.stage].label}
                       </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-foreground-muted">
+                      <span title="Stima da intento e formulazione, non da conversioni misurate">
+                        Potenziale {Math.round(keyword.commercialScore)}/100
+                      </span>
+                      {keyword.searchVolume != null ? (
+                        <span>{keyword.searchVolume.toLocaleString('it-IT')} ricerche/mese stimate</span>
+                      ) : null}
+                    </div>
+
+                    {keyword.rationale ? (
+                      <p className="text-xs leading-relaxed text-foreground-muted">
+                        {keyword.rationale}
+                      </p>
                     ) : null}
-                    <KeywordStatusBadge status={keyword.status} />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                   {isSuggested ? (
                     <>
                       <Button

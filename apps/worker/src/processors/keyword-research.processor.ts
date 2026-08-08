@@ -4,6 +4,7 @@ import {
   type BrandContext,
   type KeywordResearchResult,
 } from '@growmy/ai';
+import { assessCommercialValue, computePriorityScore } from '@growmy/core';
 import {
   getWorkerDb,
   keywordClusters,
@@ -50,6 +51,8 @@ interface KeywordRowInput {
   searchIntent?: string;
   estimatedVolume?: number;
   estimatedDifficulty?: number;
+  estimatedCpc?: number;
+  commercialRationale?: string;
   rationale?: string;
 }
 
@@ -60,6 +63,47 @@ function toInsertValues(
   clusterId: string | null,
   isPillar: boolean,
 ) {
+  const difficulty = Number.isFinite(k.estimatedDifficulty)
+    ? String(Math.min(100, Math.max(0, k.estimatedDifficulty!)))
+    : null;
+  const searchVolume = Number.isFinite(k.estimatedVolume)
+    ? Math.round(k.estimatedVolume!)
+    : null;
+  // Un CPC negativo o assurdo è un errore del modello, non un dato: scartato
+  // invece di propagarsi nel punteggio.
+  const cpc =
+    Number.isFinite(k.estimatedCpc) && k.estimatedCpc! >= 0 && k.estimatedCpc! < 1000
+      ? Math.round(k.estimatedCpc! * 100) / 100
+      : null;
+
+  /**
+   * La priorità non è più un valore fisso: mescola quanto la keyword vale
+   * commercialmente con quanto è raggiungibile. Prima ogni keyword nasceva a
+   * 50 e la coda di produzione era di fatto ordinata per data di inserimento —
+   * cioè per niente.
+   */
+  const commercial = assessCommercialValue({
+    term: k.term,
+    searchIntent: k.searchIntent ?? null,
+    cpc,
+  });
+
+  const priorityScore = computePriorityScore({
+    commercialScore: commercial.score,
+    searchVolume,
+    difficulty,
+  });
+
+  /**
+   * La motivazione unisce le tre voci in un testo unico: l'angolo editoriale
+   * proposto dal modello, il suo giudizio commerciale e la lettura
+   * deterministica dell'intento. Il campo è uno solo (`priority_rationale`) e
+   * l'utente deve capire da dove viene il punteggio senza aprire il codice.
+   */
+  const rationale = [k.rationale, k.commercialRationale, commercial.rationale]
+    .filter(Boolean)
+    .join(' — ');
+
   return {
     organizationId,
     productId,
@@ -68,12 +112,12 @@ function toInsertValues(
     isPillar,
     status: 'suggested' as const,
     source: 'ai_research' as const,
-    searchVolume: Number.isFinite(k.estimatedVolume) ? Math.round(k.estimatedVolume!) : null,
-    difficulty: Number.isFinite(k.estimatedDifficulty)
-      ? String(Math.min(100, Math.max(0, k.estimatedDifficulty!)))
-      : null,
+    searchVolume,
+    difficulty,
+    cpc: cpc === null ? null : String(cpc),
     searchIntent: k.searchIntent ?? null,
-    priorityRationale: k.rationale ?? null,
+    priorityScore: String(priorityScore),
+    priorityRationale: rationale || null,
   };
 }
 

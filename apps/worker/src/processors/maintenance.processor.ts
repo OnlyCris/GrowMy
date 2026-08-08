@@ -253,3 +253,107 @@ export async function processStuckJobRecovery(
 
   logger.warn({ count: rows.length }, 'job appesi recuperati');
 }
+
+/**
+ * RICARICA DELLE KEYWORD
+ *
+ * Rifornisce la scorta di keyword lavorabili di ogni prodotto attivo, così la
+ * pipeline editoriale non si ferma perché nessuno si è ricordato di premere
+ * "Genera keyword".
+ *
+ * NON GENERA A CADENZA FISSA, E LA DIFFERENZA È IL PUNTO DI TUTTO IL JOB.
+ * Un cron che produce otto proposte a settimana comunque vada, dopo due mesi
+ * lascia settanta keyword non revisionate in coda: la revisione umana diventa
+ * un muro, l'utente smette di guardarla, e il cancello di qualità che
+ * giustifica l'intera architettura si trasforma in una casella di posta
+ * ignorata. Qui il tempo è solo l'intervallo di CONTROLLO; la condizione è il
+ * livello della scorta.
+ *
+ * La scorta conta anche le keyword `suggested`, cioè quelle ancora da
+ * approvare. È deliberato: se ce ne sono già dieci in attesa di un umano, il
+ * problema non è la mancanza di proposte e generarne altre lo peggiora.
+ */
+
+/** Sotto questa soglia di keyword lavorabili il prodotto viene rifornito. */
+const KEYWORD_POOL_THRESHOLD = 8;
+
+/** Quante proporne per volta. Un lotto piccolo si revisiona in una seduta. */
+const REPLENISH_BATCH = 6;
+
+export async function processKeywordReplenish(
+  ctx: ProcessorContext,
+): Promise<void> {
+  const db = getWorkerDb();
+  const { recorder, logger } = ctx;
+
+  /**
+   * Un solo giro in SQL invece di una query per prodotto: il conteggio della
+   * scorta è una sottoquery correlata, e `having`/`where` filtrano i prodotti
+   * già riforniti prima che tocchino la rete.
+   */
+  const lowStock = await db
+    .select({
+      productId: products.id,
+      organizationId: products.organizationId,
+      pool: sql<number>`(
+        select count(*)::int from ${keywords}
+        where ${keywords.productId} = ${sql.raw('"products"."id"')}
+          and ${keywords.status} in ('suggested','approved','scheduled')
+          and ${keywords.deletedAt} is null
+      )`,
+    })
+    .from(products)
+    .where(and(eq(products.status, 'active'), isNull(products.deletedAt)))
+    .limit(200);
+
+  const needing = lowStock.filter((row) => row.pool < KEYWORD_POOL_THRESHOLD);
+
+  if (needing.length === 0) {
+    await recorder.event({
+      step: 'replenish.none',
+      message: 'Tutti i prodotti attivi hanno keyword a sufficienza.',
+    });
+    return;
+  }
+
+  let enqueued = 0;
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const row of needing) {
+    try {
+      await ctx.enqueue({
+        type: 'keyword_research',
+        organizationId: row.organizationId,
+        productId: row.productId,
+        targetType: 'product',
+        targetId: row.productId,
+        payload: { count: REPLENISH_BATCH, source: 'replenish' },
+        // Una sola ricarica automatica al giorno per prodotto, garantita
+        // dall'idempotenza di `app_enqueue_job` sulla chiave.
+        discriminator: `replenish-${today}`,
+        reserveCredit: false,
+      });
+      enqueued += 1;
+    } catch (error) {
+      // Un prodotto che non si accoda non deve fermare gli altri.
+      logger.warn(
+        {
+          productId: row.productId,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'ricarica keyword non accodata per un prodotto',
+      );
+    }
+  }
+
+  await recorder.event({
+    step: 'replenish.done',
+    message: `${enqueued} prodotti sotto scorta: nuove keyword in arrivo, da revisionare.`,
+    details: { candidates: needing.length, enqueued, threshold: KEYWORD_POOL_THRESHOLD },
+  });
+
+  logger.info(
+    { enqueued, candidates: needing.length },
+    'ricarica keyword completata',
+  );
+}

@@ -23,6 +23,7 @@ import { processKeywordResearch } from './processors/keyword-research.processor'
 import {
   processApprovalTimeoutSweep,
   processDailyDispatch,
+  processKeywordReplenish,
   processStuckJobRecovery,
 } from './processors/maintenance.processor';
 import {
@@ -150,6 +151,7 @@ const CRON_PROCESSORS: Record<string, Processor> = {
   'daily-content-dispatch': processDailyDispatch,
   'approval-timeout-sweep': processApprovalTimeoutSweep,
   'stuck-job-recovery': processStuckJobRecovery,
+  'keyword-replenish': processKeywordReplenish,
   'integration-health-check': processIntegrationHealth,
   'gsc-sync': processGscSyncCron,
   'planner-recalculate': processPlannerRecalculateCron,

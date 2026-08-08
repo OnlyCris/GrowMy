@@ -13,6 +13,7 @@ export * from './articles/slug';
  * decisioni editoriali motivate. Funzioni pure, senza I/O — il worker aggrega
  * le righe dal database e passa qui i dati già pronti.
  */
+export * from './planner/commercial-value';
 export * from './planner/ctr-curve';
 export * from './planner/ctr-gap';
 export * from './planner/striking-distance';

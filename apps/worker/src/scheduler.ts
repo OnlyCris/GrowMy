@@ -52,6 +52,16 @@ export const SCHEDULED_JOBS: ScheduledJobDefinition[] = [
     priority: JOB_PRIORITY.background,
   },
   {
+    name: 'keyword-replenish',
+    queue: QUEUE_NAMES.maintenance,
+    // Ogni giorno alle 6:10 UTC. La cadenza è solo l'intervallo di CONTROLLO:
+    // il job genera unicamente per i prodotti con la scorta sotto soglia, così
+    // un controllo giornaliero non produce proposte giornaliere.
+    cron: '10 6 * * *',
+    description: 'Rifornisce le keyword dei prodotti rimasti sotto scorta',
+    priority: JOB_PRIORITY.background,
+  },
+  {
     name: 'integration-health-check',
     queue: QUEUE_NAMES.integrationHealth,
     // Ogni giorno alle 4:20 UTC: fascia di traffico minimo, e il risultato è
