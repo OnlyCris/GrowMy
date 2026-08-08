@@ -103,13 +103,23 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static            
 
 # Le migrazioni servono al container `web` perché update.sh le esegue da qui.
 #
-# `drizzle.config.prod.ts` e NON `drizzle.config.ts`: quest'ultimo apre con
-# `import './src/load-env'`, e `packages/db/src/` non è in questa immagine —
-# il build standalone di Next non include i sorgenti. Copiarlo qui produceva
-# `Cannot find module './src/load-env'` a ogni deploy, con rollback automatico
-# subito dopo. Vedi il commento esteso in `packages/db/drizzle.config.prod.ts`.
+# Il sorgente è `drizzle.config.prod.ts`, ma nell'immagine prende il nome
+# `drizzle.config.ts`. Il rename NON è cosmetico, risolve due problemi insieme:
+#
+#  1. Il config di sviluppo apre con `import './src/load-env'`, e
+#     `packages/db/src/` non è in questa immagine — il build standalone di Next
+#     non include i sorgenti. Copiarlo qui produceva `Cannot find module
+#     './src/load-env'` a ogni deploy, con rollback automatico subito dopo.
+#
+#  2. `update.sh` si riscrive da solo con `git checkout` mentre bash lo sta
+#     eseguendo, e bash continua a leggere dal descrittore aperto sul file
+#     vecchio: qualunque modifica al comando di migrazione ha effetto solo dal
+#     deploy SUCCESSIVO. Tenere il percorso invariato (`drizzle.config.ts`)
+#     rende il fix indipendente da quale versione dello script sta girando.
+#
+# Vedi il commento esteso in `packages/db/drizzle.config.prod.ts`.
 COPY --from=builder --chown=nextjs:nodejs /app/packages/db/migrations             ./packages/db/migrations
-COPY --from=builder --chown=nextjs:nodejs /app/packages/db/drizzle.config.prod.ts ./packages/db/
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/drizzle.config.prod.ts ./packages/db/drizzle.config.ts
 
 USER nextjs
 

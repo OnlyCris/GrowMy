@@ -298,7 +298,7 @@ fi
 log "Applicazione delle migrazioni"
 compose run --rm --no-deps \
   -e DATABASE_URL="postgres://app_migrator:${POSTGRES_MIGRATOR_PASSWORD:-$POSTGRES_PASSWORD}@postgres:5432/growmy" \
-  web npx drizzle-kit migrate --config=packages/db/drizzle.config.prod.ts
+  web npx drizzle-kit migrate --config=packages/db/drizzle.config.ts
 
 ok "Migrazioni applicate"
 

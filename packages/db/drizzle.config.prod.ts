@@ -24,6 +24,16 @@ import { defineConfig } from 'drizzle-kit';
  *
  * `drizzle.config.ts` resta il file per lo sviluppo, dove il caricamento dei
  * `.env` è invece indispensabile.
+ *
+ * NEL CONTAINER QUESTO FILE SI CHIAMA `drizzle.config.ts`: `Dockerfile.web` lo
+ * copia rinominandolo. Sembra un dettaglio ed è invece la parte che fa
+ * funzionare il fix al primo deploy anziché al secondo — `update.sh` si
+ * riscrive da solo con `git checkout` mentre bash lo esegue, e bash continua a
+ * leggere dal descrittore aperto sul file vecchio. Se il fix avesse richiesto
+ * anche un nuovo percorso nel comando di migrazione, quel percorso sarebbe
+ * arrivato un deploy in ritardo rispetto all'immagine che lo contiene, e il
+ * deploy sarebbe fallito comunque. Mantenendo il nome invariato, il comando
+ * vecchio e quello nuovo puntano entrambi al file giusto.
  */
 export default defineConfig({
   out: './migrations',
